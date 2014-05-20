@@ -132,6 +132,34 @@ config SSM
 
 config VIBRATOR_PM8974_HAPTIC
 	tristate "Support for vibrator power control using pm8974"
+
+config QCA1530
+	tristate "QCA1530 SoC GNSS Driver"
+	depends on REGULATOR && OF
+	depends on GPIOLIB && OF_GPIO
+	depends on CLKDEV_LOOKUP
+	help
+	  Say Y here to include support for QCA1530 SOC chip.
+
+	  QCA1530 chip enables support for GPS- and GLONASS-based position
+	  determination.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called qca1530.
+
+config PFT
+	bool "Per-File-Tagger driver"
+	default n
+	help
+		This driver is used for tagging enterprise files.
+		It is part of the Per-File-Encryption (PFE) feature.
+		The driver is tagging files when created by
+		registered application.
+		Tagged files are encrypted using the dm-req-crypt driver.
+
+config MSM_SPSS
+	tristate "MSM SPSS driver"
+	default n
 	help
 	  This option enables support for the vibrator power control.
 
