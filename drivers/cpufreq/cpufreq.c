@@ -1010,9 +1010,6 @@ static int cpufreq_add_dev(struct device *dev, struct subsys_interface *sif)
 		goto err_unlock_policy;
 	}
 
-	/* related cpus should atleast have policy->cpus */
-	cpumask_or(policy->related_cpus, policy->related_cpus, policy->cpus);
-
 	/*
 	 * affected cpus must always be the one, which are online. We aren't
 	 * managing offline cpus here.
@@ -1667,14 +1664,8 @@ int __cpufreq_driver_target(struct cpufreq_policy *policy,
 		init_freq_table();
 	}
 #endif
-	/* Make sure that target_freq is within supported range */
-	if (target_freq > policy->max)
-		target_freq = policy->max;
-	if (target_freq < policy->min)
-		target_freq = policy->min;
-
-	pr_debug("target for CPU %u: %u kHz, relation %u, requested %u kHz\n",
-			policy->cpu, target_freq, relation, old_target_freq);
+	pr_debug("target for CPU %u: %u kHz, relation %u\n", policy->cpu,
+		target_freq, relation);
 
 	if (target_freq == policy->cur)
 		return 0;
