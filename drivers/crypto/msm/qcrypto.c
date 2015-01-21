@@ -4743,10 +4743,11 @@ err:
 
 static int _qcrypto_engine_in_use(struct crypto_engine *pengine)
 {
-	if (pengine->req || pengine->req_queue.qlen)
+	struct crypto_priv *cp = pengine->pcp;
+
+	if (pengine->req || pengine->req_queue.qlen || cp->req_queue.qlen)
 		return 1;
-	else
-		return 0;
+	return 0;
 }
 
 static void _qcrypto_do_suspending(struct crypto_engine *pengine)
