@@ -51,6 +51,13 @@ config LGE_SHARPENING
 	---help---
 	  Allow control of the display sharpening via sysfs node.
 
+config FB_MSM_MDSS_KCAL_CTRL
+	depends on FB_MSM_MDSS
+	bool "MDSS color control"
+	---help---
+	  Enable sysfs for rgb/lut control for mdss-mdp display controllers
+	  in the MDSS sub-system.
+
 config LCD_NOTIFY
 	depends on FB_MSM_MDSS
 	bool "Enable LCD Notifier Helper"
