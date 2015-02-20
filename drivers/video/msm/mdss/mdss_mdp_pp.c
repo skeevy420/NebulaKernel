@@ -1864,7 +1864,7 @@ static struct mdp_ar_gc_lut_data test_b[GC_LUT_SEGMENTS] = {
 		{0x00000000, 0x00000000, 0x00000000}
 };
 
-void mdss_mdp_pp_kcal_enable(bool enable)
+static void mdss_mdp_pp_argc(void)
 {
 	int disp_num = 0;
 	u32 tbl_size;
@@ -1892,18 +1892,15 @@ void mdss_mdp_pp_kcal_enable(bool enable)
 	pgc_config->b_data =
 		&mdss_pp_res->gc_lut_b[disp_num][0];
 
-	if (enable)
-		pgc_config->flags = MDP_PP_OPS_WRITE | MDP_PP_OPS_ENABLE;
-	else {
-		pgc_config->flags = MDP_PP_OPS_WRITE | MDP_PP_OPS_DISABLE;
-		mdss_pp_res->pp_disp_flags[disp_num] |= PP_FLAGS_DIRTY_PGC;
-	}
+	pgc_config->flags |= MDP_PP_OPS_WRITE;
+	pgc_config->flags |= MDP_PP_OPS_ENABLE;
 }
 
-void mdss_mdp_pp_kcal_update(int kr, int kg, int kb)
+void update_preset_lcdc_lut(int kr, int kg, int kb)
 {
 	int i;
 	int disp_num = 0;
+	struct mdp_pgc_lut_data *pgc_config;
 
 	pr_info("r=[%d], g=[%d], b=[%d]\n", kr, kg, kb);
 
@@ -1924,10 +1921,13 @@ void mdss_mdp_pp_kcal_update(int kr, int kg, int kb)
 		SCALED_BY_KCAL(test_b[i].offset, kb);
 	}
 
+	pgc_config = &mdss_pp_res->pgc_disp_cfg[disp_num];
+	pgc_config->flags |= MDP_PP_OPS_WRITE;
+	pgc_config->flags |= MDP_PP_OPS_ENABLE;
 	mdss_pp_res->pp_disp_flags[disp_num] |= PP_FLAGS_DIRTY_PGC;
 }
 
-int mdss_mdp_pp_kcal_get(int data)
+int mdss_mdp_pp_get_kcal(int data)
 {
 	int ret;
 	int disp_num = 0;
@@ -1999,8 +1999,8 @@ int mdss_mdp_pp_init(struct device *dev)
 	}
 
 	if (!ret) {
-		mdss_mdp_pp_kcal_enable(true);
-		mdss_mdp_pp_kcal_update(MAX_KCAL, MAX_KCAL, MAX_KCAL);
+		mdss_mdp_pp_argc();
+		update_preset_lcdc_lut(MAX_KCAL, MAX_KCAL, MAX_KCAL);
 	}
 
 	mutex_unlock(&mdss_pp_mutex);
