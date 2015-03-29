@@ -16,7 +16,6 @@
 #include <linux/list.h>
 #include <linux/uaccess.h>
 #include <linux/slab.h>
-#include <linux/ratelimit.h>
 #include <media/msm_jpeg.h>
 #include "msm_jpeg_sync.h"
 #include "msm_jpeg_core.h"
@@ -132,14 +131,14 @@ static int msm_jpeg_q_wait(struct msm_jpeg_q *q_p)
 	return rc;
 }
 
-static int msm_jpeg_q_wakeup(struct msm_jpeg_q *q_p)
+inline int msm_jpeg_q_wakeup(struct msm_jpeg_q *q_p)
 {
 	JPEG_DBG("%s:%d] %s\n", __func__, __LINE__, q_p->name);
 	wake_up(&q_p->wait);
 	return 0;
 }
 
-static int msm_jpeg_q_unblock(struct msm_jpeg_q *q_p)
+inline int msm_jpeg_q_unblock(struct msm_jpeg_q *q_p)
 {
 	JPEG_DBG("%s:%d] %s\n", __func__, __LINE__, q_p->name);
 	q_p->unblck = 1;
@@ -910,7 +909,7 @@ long __msm_jpeg_ioctl(struct msm_jpeg_device *pgmn_dev,
 		rc = msm_jpeg_ioctl_set_clk_rate(pgmn_dev, arg);
 		break;
 	default:
-		pr_err_ratelimited("%s:%d] cmd = %d not supported\n",
+		JPEG_PR_ERR(KERN_INFO "%s:%d] cmd = %d not supported\n",
 			__func__, __LINE__, _IOC_NR(cmd));
 		rc = -EINVAL;
 		break;
