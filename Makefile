@@ -245,14 +245,14 @@ CONFIG_SHELL := $(shell if [ -x "$$BASH" ]; then echo $$BASH; \
 	  else if [ -x /bin/bash ]; then echo /bin/bash; \
 	  else echo sh; fi ; fi)
 
-GRAPHITE_FLAGS = -fgraphite -floop-parallelize-all -ftree-loop-linear -floop-interchange -floop-strip-mine -floop-block
+GRAPHITE_FLAGS = -fgraphite -fgraphite-identity -floop-flatten -floop-parallelize-all -ftree-loop-linear -floop-interchange -floop-strip-mine -floop-block -Wno-error=maybe-uninitialized
 
 HOSTCC       = $(CCACHE) gcc
 HOSTCXX      = $(CCACHE) g++
 HOSTCFLAGS   = -Wall -Wmissing-prototypes -Wstrict-prototypes -O3 -fomit-frame-pointer -fgcse-las
+HOSTCFLAGS   += $(GRAPHITE_FLAGS)
 HOSTCXXFLAGS = -O3 -fgcse-las
 HOSTCXXFLAGS += $(GRAPHITE_FLAGS)
-HOSTCFLAGS   += $(GRAPHITE_FLAGS)
 
 # Decide whether to build built-in, modular, or both.
 # Normally, just do built-in.
@@ -336,9 +336,9 @@ include $(srctree)/scripts/Kbuild.include
 
 AS		= $(CROSS_COMPILE)as
 LD		= $(CROSS_COMPILE)ld
-REAL_CC		= $(CCACHE) $(CROSS_COMPILE)gcc
+CC		= $(CCACHE) $(CROSS_COMPILE)gcc
+CC		+= $(GRAPHITE_FLAGS) -O3 -mfpu=neon-vfpv4
 CPP		= $(CC) -E
-CC		+= $(GRAPHITE_FLAGS)
 CPP		+= $(GRAPHITE_FLAGS)
 AR		= $(CROSS_COMPILE)ar
 NM		= $(CROSS_COMPILE)nm
@@ -355,28 +355,19 @@ CHECK		= sparse
 
 # Use the wrapper for the compiler.  This wrapper scans for new
 # warnings and causes the build to stop upon encountering them.
-CC		= $(srctree)/scripts/gcc-wrapper.py $(REAL_CC)
+# CC		= $(srctree)/scripts/gcc-wrapper.py $(REAL_CC)
 
 CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
 		  -Wbitwise -Wno-return-void $(CF)
 
-MODFLAGS        = -DMODULE \
-                  -mfpu=neon-vfpv4 \
-                  -mtune=cortex-a15 \
-                  -O3 \
-                  -fgcse-las \
-                  -Wno-error=implicit-function-declaration
+KERNELFLAGS	= -DNDEBUG -munaligned-access -fforce-addr -fsingle-precision-constant -mcpu=cortex-a15 -mtune=cortex-a15 -marm -mfpu=neon-vfpv4 -fgcse-las
+MODFLAGS	= -DMODULE $(KERNELFLAGS)
 CFLAGS_MODULE   = $(MODFLAGS)
+CFLAGS_MODULE   += $(GRAPHITE_FLAGS)
 AFLAGS_MODULE   = $(MODFLAGS)
 LDFLAGS_MODULE  = -T $(srctree)/scripts/module-common.lds
-CFLAGS_KERNEL   = -mfpu=neon-vfpv4 \
-                  -mtune=cortex-a15 \
-                  -O2 \
-                  -fgcse-las \
-                  -fpredictive-commoning \
-		  -Wno-error=implicit-function-declaration
-CFLAGS_KERNEL	+= $(GRAPHITE_FLAGS) 
-CFLAGS_MODULE	+= $(GRAPHITE_FLAGS)
+CFLAGS_KERNEL	= $(KERNELFLAGS) -fpredictive-commoning
+CFLAGS_KERNEL   += $(GRAPHITE_FLAGS)
 AFLAGS_KERNEL	=
 CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage
 
@@ -390,11 +381,14 @@ LINUXINCLUDE    := -I$(srctree)/arch/$(hdr-arch)/include \
 
 KBUILD_CPPFLAGS := -D__KERNEL__
 
-KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
+KBUILD_CFLAGS   := -Wall -DNDEBUG -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -fno-strict-aliasing -fno-common \
 		   -Werror-implicit-function-declaration \
 		   -Wno-format-security \
 		   -fno-delete-null-pointer-checks
+
+KBUILD_CFLAGS   += $(GRAPHITE_FLAGS)
+
 KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
 KBUILD_AFLAGS   := -D__ASSEMBLY__
@@ -586,9 +580,12 @@ all: vmlinux
 
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
 KBUILD_CFLAGS	+= -Os $(call cc-disable-warning,maybe-uninitialized,)
-else
-KBUILD_CFLAGS	+= -O3
-KBUILD_CFLAGS	+=  $(GRAPHITE_FLAGS)
+endif
+ifdef CONFIG_CC_OPTIMIZE_DEFAULT
+KBUILD_CFLAGS += -O2
+endif
+ifdef CONFIG_CC_OPTIMIZE_MORE
+KBUILD_CFLAGS += -O3 -fmodulo-sched -fmodulo-sched-allow-regmoves -fno-tree-vectorize
 endif
 
 include $(srctree)/arch/$(SRCARCH)/Makefile
@@ -1012,7 +1009,7 @@ prepare1: prepare2 include/linux/version.h include/generated/utsrelease.h \
 archprepare: archheaders archscripts prepare1 scripts_basic
 
 prepare0: archprepare FORCE
-	$(Q)$(MAKE) $(build)=.
+	$(Q)$(MAKE) $(build)=. missing-syscalls
 
 # All the preparing..
 prepare: prepare0
