@@ -44,6 +44,7 @@
 #include <mach/rpm-smd.h>
 #include <mach/scm.h>
 #include <linux/sched.h>
+#include <linux/ratelimit.h>
 
 #define MAX_CURRENT_UA 1000000
 #define MAX_RAILS 5
@@ -76,11 +77,6 @@ static int limit_idx_low = 8;
 static int limit_idx_high = 20;
 static int max_tsens_num;
 static struct cpufreq_frequency_table *table;
-static uint32_t usefreq;
-static int freq_table_get;
-static bool vdd_rstr_enabled;
-static bool vdd_rstr_nodes_called;
-static bool vdd_rstr_probed;
 static bool psm_enabled;
 static bool psm_nodes_called;
 static bool psm_probed;
@@ -93,7 +89,6 @@ static bool interrupt_mode_enable;
 static bool msm_thermal_probed;
 static bool therm_reset_enabled;
 static int *tsens_id_map;
-static DEFINE_MUTEX(vdd_rstr_mutex);
 static DEFINE_MUTEX(psm_mutex);
 static DEFINE_MUTEX(ocr_mutex);
 static uint32_t min_freq_limit;
@@ -173,7 +168,6 @@ struct psm_rail {
 
 enum msm_thresh_list {
 	MSM_THERM_RESET,
-	MSM_VDD_RESTRICTION,
 	MSM_LIST_MAX_NR,
 };
 
@@ -182,11 +176,6 @@ static struct psm_rail *ocr_rails;
 static struct rail *rails;
 static struct cpu_info cpus[NR_CPUS];
 static struct threshold_info *thresh;
-
-struct vdd_rstr_enable {
-	struct kobj_attribute ko_attr;
-	uint32_t enabled;
-};
 
 enum efuse_data {
 	EFUSE_ADDRESS = 0,
@@ -209,31 +198,6 @@ enum ocr_request {
 	OPTIMUM_CURRENT_MAX,
 	OPTIMUM_CURRENT_NR,
 };
-
-#define VDD_RES_RO_ATTRIB(_rail, ko_attr, j, _name) \
-	ko_attr.attr.name = __stringify(_name); \
-	ko_attr.attr.mode = 0444; \
-	ko_attr.show = vdd_rstr_reg_##_name##_show; \
-	ko_attr.store = NULL; \
-	sysfs_attr_init(&ko_attr.attr); \
-	_rail.attr_gp.attrs[j] = &ko_attr.attr;
-
-#define VDD_RES_RW_ATTRIB(_rail, ko_attr, j, _name) \
-	ko_attr.attr.name = __stringify(_name); \
-	ko_attr.attr.mode = 0644; \
-	ko_attr.show = vdd_rstr_reg_##_name##_show; \
-	ko_attr.store = vdd_rstr_reg_##_name##_store; \
-	sysfs_attr_init(&ko_attr.attr); \
-	_rail.attr_gp.attrs[j] = &ko_attr.attr;
-
-#define VDD_RSTR_ENABLE_FROM_ATTRIBS(attr) \
-	(container_of(attr, struct vdd_rstr_enable, ko_attr));
-
-#define VDD_RSTR_REG_VALUE_FROM_ATTRIBS(attr) \
-	(container_of(attr, struct rail, value_attr));
-
-#define VDD_RSTR_REG_LEVEL_FROM_ATTRIBS(attr) \
-	(container_of(attr, struct rail, level_attr));
 
 #define OCR_RW_ATTRIB(_rail, ko_attr, j, _name) \
 	ko_attr.attr.name = __stringify(_name); \
@@ -324,22 +288,6 @@ static struct notifier_block msm_thermal_cpufreq_notifier = {
 	.notifier_call = msm_thermal_cpufreq_callback,
 };
 
-/* If freq table exists, then we can send freq request */
-static int check_freq_table(void)
-{
-	int ret = 0;
-	struct cpufreq_frequency_table *table = NULL;
-
-	table = cpufreq_frequency_get_table(0);
-	if (!table) {
-		pr_debug("error reading cpufreq table\n");
-		return -EINVAL;
-	}
-	freq_table_get = 1;
-
-	return ret;
-}
-
 static void update_cpu_freq(int cpu)
 {
 	int ret = 0;
@@ -350,100 +298,6 @@ static void update_cpu_freq(int cpu)
 			pr_err("Unable to update policy for cpu:%d. err:%d\n",
 				cpu, ret);
 	}
-}
-
-static int update_cpu_min_freq_all(uint32_t min)
-{
-	uint32_t cpu = 0;
-	int ret = 0;
-
-	if (!freq_table_get) {
-		ret = check_freq_table();
-		if (ret) {
-			pr_err("Fail to get freq table. err:%d\n", ret);
-			return ret;
-		}
-	}
-	/* If min is larger than allowed max */
-	min = min(min, table[limit_idx_high].frequency);
-
-	pr_debug("Requesting min freq:%u for all CPU's\n", min);
-	if (freq_mitigation_task) {
-		min_freq_limit = min;
-		complete(&freq_mitigation_complete);
-	} else {
-		get_online_cpus();
-		for_each_possible_cpu(cpu) {
-			cpus[cpu].limited_min_freq = min;
-			update_cpu_freq(cpu);
-		}
-		put_online_cpus();
-	}
-
-	return ret;
-}
-
-static int vdd_restriction_apply_freq(struct rail *r, int level)
-{
-	int ret = 0;
-
-	if (level == r->curr_level)
-		return ret;
-
-	/* level = -1: disable, level = 0,1,2..n: enable */
-	if (level == -1) {
-		ret = update_cpu_min_freq_all(r->min_level);
-		if (ret)
-			return ret;
-		else
-			r->curr_level = -1;
-	} else if (level >= 0 && level < (r->num_levels)) {
-		ret = update_cpu_min_freq_all(r->levels[level]);
-		if (ret)
-			return ret;
-		else
-			r->curr_level = level;
-	} else {
-		pr_err("level input:%d is not within range\n", level);
-		return -EINVAL;
-	}
-
-	return ret;
-}
-
-static int vdd_restriction_apply_voltage(struct rail *r, int level)
-{
-	int ret = 0;
-
-	if (r->reg == NULL) {
-		pr_err("%s don't have regulator handle. can't apply vdd\n",
-				r->name);
-		return -EFAULT;
-	}
-	if (level == r->curr_level)
-		return ret;
-
-	/* level = -1: disable, level = 0,1,2..n: enable */
-	if (level == -1) {
-		ret = regulator_set_voltage(r->reg, r->min_level,
-			r->levels[r->num_levels - 1]);
-		if (!ret)
-			r->curr_level = -1;
-		pr_debug("Requested min level for %s. curr level: %d\n",
-				r->name, r->curr_level);
-	} else if (level >= 0 && level < (r->num_levels)) {
-		ret = regulator_set_voltage(r->reg, r->levels[level],
-			r->levels[r->num_levels - 1]);
-		if (!ret)
-			r->curr_level = level;
-		pr_debug("Requesting level %d for %s. curr level: %d\n",
-			r->levels[level], r->name, r->levels[r->curr_level]);
-	} else {
-		pr_err("level input:%d is not within range\n", level);
-		return -EINVAL;
-	}
-
-	return ret;
 }
 
 /* Setting all rails the same mode */
@@ -473,154 +327,6 @@ static ssize_t default_cpu_temp_limit_show(struct kobject *kobj,
 	struct kobj_attribute *attr, char *buf)
 {
 	return snprintf(buf, PAGE_SIZE, "%d\n", default_cpu_temp_limit);
-}
-
-static int vdd_rstr_en_show(
-	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
-{
-	struct vdd_rstr_enable *en = VDD_RSTR_ENABLE_FROM_ATTRIBS(attr);
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", en->enabled);
-}
-
-static ssize_t vdd_rstr_en_store(struct kobject *kobj,
-	struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	int ret = 0;
-	int i = 0;
-	uint8_t en_cnt = 0;
-	uint8_t dis_cnt = 0;
-	uint32_t val = 0;
-	struct kernel_param kp;
-	struct vdd_rstr_enable *en = VDD_RSTR_ENABLE_FROM_ATTRIBS(attr);
-
-	mutex_lock(&vdd_rstr_mutex);
-	kp.arg = &val;
-	ret = param_set_bool(buf, &kp);
-	if (ret) {
-		pr_err("Invalid input %s for enabled\n", buf);
-		goto done_vdd_rstr_en;
-	}
-
-	if ((val == 0) && (en->enabled == 0))
-		goto done_vdd_rstr_en;
-
-	for (i = 0; i < rails_cnt; i++) {
-		if (rails[i].freq_req == 1 && freq_table_get)
-			ret = vdd_restriction_apply_freq(&rails[i],
-					(val) ? 0 : -1);
-		else
-			ret = vdd_restriction_apply_voltage(&rails[i],
-			(val) ? 0 : -1);
-
-		/*
-		 * Even if fail to set one rail, still try to set the
-		 * others. Continue the loop
-		 */
-		if (ret)
-			pr_err("Set vdd restriction for %s failed\n",
-					rails[i].name);
-		else {
-			if (val)
-				en_cnt++;
-			else
-				dis_cnt++;
-		}
-	}
-	/* As long as one rail is enabled, vdd rstr is enabled */
-	if (val && en_cnt)
-		en->enabled = 1;
-	else if (!val && (dis_cnt == rails_cnt))
-		en->enabled = 0;
-	pr_debug("%s vdd restriction. curr: %d\n",
-			(val) ? "Enable" : "Disable", en->enabled);
-
-done_vdd_rstr_en:
-	mutex_unlock(&vdd_rstr_mutex);
-	return count;
-}
-
-static struct vdd_rstr_enable vdd_rstr_en = {
-	.ko_attr.attr.name = __stringify(enabled),
-	.ko_attr.attr.mode = 0644,
-	.ko_attr.show = vdd_rstr_en_show,
-	.ko_attr.store = vdd_rstr_en_store,
-	.enabled = 1,
-};
-
-static struct attribute *vdd_rstr_en_attribs[] = {
-	&vdd_rstr_en.ko_attr.attr,
-	NULL,
-};
-
-static struct attribute_group vdd_rstr_en_attribs_gp = {
-	.attrs  = vdd_rstr_en_attribs,
-};
-
-static int vdd_rstr_reg_value_show(
-	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
-{
-	int val = 0;
-	struct rail *reg = VDD_RSTR_REG_VALUE_FROM_ATTRIBS(attr);
-	/* -1:disabled, -2:fail to get regualtor handle */
-	if (reg->curr_level < 0)
-		val = reg->curr_level;
-	else
-		val = reg->levels[reg->curr_level];
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", val);
-}
-
-static int vdd_rstr_reg_level_show(
-	struct kobject *kobj, struct kobj_attribute *attr, char *buf)
-{
-	struct rail *reg = VDD_RSTR_REG_LEVEL_FROM_ATTRIBS(attr);
-	return snprintf(buf, PAGE_SIZE, "%d\n", reg->curr_level);
-}
-
-static ssize_t vdd_rstr_reg_level_store(struct kobject *kobj,
-	struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	int ret = 0;
-	int val = 0;
-
-	struct rail *reg = VDD_RSTR_REG_LEVEL_FROM_ATTRIBS(attr);
-
-	mutex_lock(&vdd_rstr_mutex);
-	if (vdd_rstr_en.enabled == 0)
-		goto done_store_level;
-
-	ret = kstrtouint(buf, 10, &val);
-	if (ret) {
-		pr_err("Invalid input %s for level\n", buf);
-		goto done_store_level;
-	}
-
-	if (val < 0 || val > reg->num_levels - 1) {
-		pr_err(" Invalid number %d for level\n", val);
-		goto done_store_level;
-	}
-
-	if (val != reg->curr_level) {
-		if (reg->freq_req == 1 && freq_table_get)
-			update_cpu_min_freq_all(reg->levels[val]);
-		else {
-			ret = vdd_restriction_apply_voltage(reg, val);
-			if (ret) {
-				pr_err( \
-				"Set vdd restriction for regulator %s failed. err:%d\n",
-				reg->name, ret);
-				goto done_store_level;
-			}
-		}
-		reg->curr_level = val;
-		pr_debug("Request level %d for %s\n",
-				reg->curr_level, reg->name);
-	}
-
-done_store_level:
-	mutex_unlock(&vdd_rstr_mutex);
-	return count;
 }
 
 static int request_optimum_current(struct psm_rail *rail, enum ocr_request req)
@@ -803,50 +509,6 @@ fail:
 	return ret;
 }
 
-/* 1:enable, 0:disable */
-static int vdd_restriction_apply_all(int en)
-{
-	int i = 0;
-	int en_cnt = 0;
-	int dis_cnt = 0;
-	int fail_cnt = 0;
-	int ret = 0;
-
-	for (i = 0; i < rails_cnt; i++) {
-		if (rails[i].freq_req == 1 && freq_table_get)
-			ret = vdd_restriction_apply_freq(&rails[i],
-					en ? 0 : -1);
-		else
-			ret = vdd_restriction_apply_voltage(&rails[i],
-					en ? 0 : -1);
-		if (ret) {
-			pr_err("Failed to %s for %s. err:%d",
-					(en) ? "enable" : "disable",
-					rails[i].name, ret);
-			fail_cnt++;
-		} else {
-			if (en)
-				en_cnt++;
-			else
-				dis_cnt++;
-		}
-	}
-
-	/* As long as one rail is enabled, vdd rstr is enabled */
-	if (en && en_cnt)
-		vdd_rstr_en.enabled = 1;
-	else if (!en && (dis_cnt == rails_cnt))
-		vdd_rstr_en.enabled = 0;
-
-	/*
-	 * Check fail_cnt again to make sure all of the rails are applied
-	 * restriction successfully or not
-	 */
-	if (fail_cnt)
-		return -EFAULT;
-	return ret;
-}
-
 static int msm_thermal_get_freq_table(void)
 {
 	int ret = 0;
@@ -862,7 +524,6 @@ static int msm_thermal_get_freq_table(void)
 	while (table[i].frequency != CPUFREQ_TABLE_END)
 		i++;
 
-	limit_idx_low = 0;
 	limit_idx_high = limit_idx = i - 1;
 	BUG_ON(limit_idx_high <= 0 || limit_idx_high <= limit_idx_low);
 fail:
@@ -1231,59 +892,6 @@ do_ocr_exit:
 	return ret;
 }
 
-static int do_vdd_restriction(void)
-{
-	long temp = 0;
-	int ret = 0;
-	int i = 0;
-	int dis_cnt = 0;
-
-	if (!vdd_rstr_enabled)
-		return ret;
-
-	if (usefreq && !freq_table_get) {
-		if (check_freq_table())
-			return ret;
-	}
-
-	mutex_lock(&vdd_rstr_mutex);
-	for (i = 0; i < max_tsens_num; i++) {
-		ret = therm_get_temp(tsens_id_map[i], THERM_TSENS_ID, &temp);
-		if (ret) {
-			pr_err("Unable to read TSENS sensor:%d. err:%d\n",
-				tsens_id_map[i], ret);
-			dis_cnt++;
-			continue;
-		}
-		if (temp <=  msm_thermal_info.vdd_rstr_temp_degC) {
-			ret = vdd_restriction_apply_all(1);
-			if (ret) {
-				pr_err( \
-				"Enable vdd rstr for all failed. err:%d\n",
-					ret);
-				goto exit;
-			}
-			pr_debug("Enabled Vdd Restriction tsens:%d. Temp:%ld\n",
-			thresh[MSM_VDD_RESTRICTION].thresh_list[i].sensor_id,
-			temp);
-			goto exit;
-		} else if (temp > msm_thermal_info.vdd_rstr_temp_hyst_degC)
-			dis_cnt++;
-	}
-	if (dis_cnt == max_tsens_num) {
-		ret = vdd_restriction_apply_all(0);
-		if (ret) {
-			pr_err("Disable vdd rstr for all failed. err:%d\n",
-					ret);
-			goto exit;
-		}
-		pr_debug("Disabled Vdd Restriction\n");
-	}
-exit:
-	mutex_unlock(&vdd_rstr_mutex);
-	return ret;
-}
-
 static int do_psm(void)
 {
 	long temp = 0;
@@ -1406,7 +1014,6 @@ static void check_temp(struct work_struct *work)
 			limit_init = 1;
 	}
 
-	do_vdd_restriction();
 	do_freq_control(temp);
 
 reschedule:
@@ -1757,54 +1364,6 @@ therm_set_exit:
 	return ret;
 }
 
-static void vdd_restriction_notify(struct therm_threshold *trig_thresh)
-{
-	int ret = 0;
-	static uint32_t vdd_sens_status;
-
-	if (!vdd_rstr_enabled)
-		return;
-	if (!trig_thresh) {
-		pr_err("Invalid input\n");
-		return;
-	}
-	if (trig_thresh->trip_triggered < 0)
-		goto set_and_exit;
-
-	mutex_lock(&vdd_rstr_mutex);
-	pr_debug("sensor:%d reached %s thresh for Vdd restriction\n",
-		tsens_id_map[trig_thresh->sensor_id],
-		(trig_thresh->trip_triggered == THERMAL_TRIP_CONFIGURABLE_HI) ?
-		"high" : "low");
-	switch (trig_thresh->trip_triggered) {
-	case THERMAL_TRIP_CONFIGURABLE_HI:
-		if (vdd_sens_status & BIT(trig_thresh->sensor_id))
-			vdd_sens_status ^= BIT(trig_thresh->sensor_id);
-		break;
-	case THERMAL_TRIP_CONFIGURABLE_LOW:
-		vdd_sens_status |= BIT(trig_thresh->sensor_id);
-		break;
-	default:
-		pr_err("Unsupported trip type\n");
-		goto unlock_and_exit;
-		break;
-	}
-
-	ret = vdd_restriction_apply_all((vdd_sens_status) ? 1 : 0);
-	if (ret) {
-		pr_err("%s vdd rstr votlage for all failed\n",
-			(vdd_sens_status) ?
-			"Enable" : "Disable");
-			goto unlock_and_exit;
-	}
-
-unlock_and_exit:
-	mutex_unlock(&vdd_rstr_mutex);
-set_and_exit:
-	set_threshold(trig_thresh->sensor_id, trig_thresh->threshold);
-	return;
-}
-
 static __ref int do_thermal_monitor(void *data)
 {
 	int ret = 0, i, j;
@@ -1848,9 +1407,6 @@ static void thermal_monitor_init(void)
 
 	if (therm_reset_enabled)
 		therm_set_threshold(&thresh[MSM_THERM_RESET]);
-
-	if (vdd_rstr_enabled)
-		therm_set_threshold(&thresh[MSM_VDD_RESTRICTION]);
 
 init_exit:
 	return;
@@ -2326,51 +1882,6 @@ reg_init:
 	return ret;
 }
 
-static int vdd_restriction_reg_init(struct platform_device *pdev)
-{
-	int ret = 0;
-	int i;
-
-	for (i = 0; i < rails_cnt; i++) {
-		if (rails[i].freq_req == 1) {
-			usefreq |= BIT(i);
-			check_freq_table();
-			/*
-			 * Restrict frequency by default until we have made
-			 * our first temp reading
-			 */
-			if (freq_table_get)
-				ret = vdd_restriction_apply_freq(&rails[i], 0);
-			else
-				pr_info("Defer vdd rstr freq init.\n");
-		} else {
-			rails[i].reg = devm_regulator_get(&pdev->dev,
-					rails[i].name);
-			if (IS_ERR_OR_NULL(rails[i].reg)) {
-				ret = PTR_ERR(rails[i].reg);
-				if (ret != -EPROBE_DEFER) {
-					pr_err( \
-					"could not get regulator: %s. err:%d\n",
-					rails[i].name, ret);
-					rails[i].reg = NULL;
-					rails[i].curr_level = -2;
-					return ret;
-				}
-				pr_info("Defer regulator %s probe\n",
-					rails[i].name);
-				return ret;
-			}
-			/*
-			 * Restrict votlage by default until we have made
-			 * our first temp reading
-			 */
-			ret = vdd_restriction_apply_voltage(&rails[i], 0);
-		}
-	}
-
-	return ret;
-}
-
 static int psm_reg_init(struct platform_device *pdev)
 {
 	int ret = 0;
@@ -2446,88 +1957,6 @@ static int msm_thermal_add_default_temp_limit_nodes(void)
 		return ret;
 	}
 	return ret;
-}
-
-static int msm_thermal_add_vdd_rstr_nodes(void)
-{
-	struct kobject *module_kobj = NULL;
-	struct kobject *vdd_rstr_kobj = NULL;
-	struct kobject *vdd_rstr_reg_kobj[MAX_RAILS] = {0};
-	int rc = 0;
-	int i = 0;
-
-	if (!vdd_rstr_probed) {
-		vdd_rstr_nodes_called = true;
-		return rc;
-	}
-
-	if (vdd_rstr_probed && rails_cnt == 0)
-		return rc;
-
-	module_kobj = kset_find_obj(module_kset, KBUILD_MODNAME);
-	if (!module_kobj) {
-		pr_err("cannot find kobject\n");
-		rc = -ENOENT;
-		goto thermal_sysfs_add_exit;
-	}
-
-	vdd_rstr_kobj = kobject_create_and_add("vdd_restriction", module_kobj);
-	if (!vdd_rstr_kobj) {
-		pr_err("cannot create vdd_restriction kobject\n");
-		rc = -ENOMEM;
-		goto thermal_sysfs_add_exit;
-	}
-
-	rc = sysfs_create_group(vdd_rstr_kobj, &vdd_rstr_en_attribs_gp);
-	if (rc) {
-		pr_err("cannot create kobject attribute group. err:%d\n", rc);
-		rc = -ENOMEM;
-		goto thermal_sysfs_add_exit;
-	}
-
-	for (i = 0; i < rails_cnt; i++) {
-		vdd_rstr_reg_kobj[i] = kobject_create_and_add(rails[i].name,
-					vdd_rstr_kobj);
-		if (!vdd_rstr_reg_kobj[i]) {
-			pr_err("cannot create kobject for %s\n",
-					rails[i].name);
-			rc = -ENOMEM;
-			goto thermal_sysfs_add_exit;
-		}
-
-		rails[i].attr_gp.attrs = kzalloc(sizeof(struct attribute *) * 3,
-					GFP_KERNEL);
-		if (!rails[i].attr_gp.attrs) {
-			pr_err("kzalloc failed\n");
-			rc = -ENOMEM;
-			goto thermal_sysfs_add_exit;
-		}
-
-		VDD_RES_RW_ATTRIB(rails[i], rails[i].level_attr, 0, level);
-		VDD_RES_RO_ATTRIB(rails[i], rails[i].value_attr, 1, value);
-		rails[i].attr_gp.attrs[2] = NULL;
-
-		rc = sysfs_create_group(vdd_rstr_reg_kobj[i],
-				&rails[i].attr_gp);
-		if (rc) {
-			pr_err("cannot create attribute group for %s. err:%d\n",
-					rails[i].name, rc);
-			goto thermal_sysfs_add_exit;
-		}
-	}
-
-	return rc;
-
-thermal_sysfs_add_exit:
-	if (rc) {
-		for (i = 0; i < rails_cnt; i++) {
-			kobject_del(vdd_rstr_reg_kobj[i]);
-			kfree(rails[i].attr_gp.attrs);
-		}
-		if (vdd_rstr_kobj)
-			kobject_del(vdd_rstr_kobj);
-	}
-	return rc;
 }
 
 static int msm_thermal_add_ocr_nodes(void)
@@ -2626,146 +2055,587 @@ static int msm_thermal_add_psm_nodes(void)
 		rc = -ENOENT;
 		goto psm_node_exit;
 	}
->>>>>>> 2677548... Revert "Revert "msm: thermal: Make core control and PSM independent of cpu frequency""
 
-unsigned int temp_threshold = 70;
-module_param(temp_threshold, int, 0755);
-
-static struct thermal_info {
-	uint32_t cpuinfo_max_freq;
-	uint32_t limited_max_freq;
-	unsigned int safe_diff;
-	bool throttling;
-	bool pending_change;
-} info = {
-	.cpuinfo_max_freq = LONG_MAX,
-	.limited_max_freq = LONG_MAX,
-	.safe_diff = 5,
-	.throttling = false,
-	.pending_change = false,
-};
-
-enum thermal_freqs {
-	FREQ_HELL		= 729600,
-	FREQ_VERY_HOT		= 1036800,
-	FREQ_HOT		= 1497600,
-	FREQ_WARM		= 1728000,
-};
-
-enum threshold_levels {
-	LEVEL_HELL		= 1 << 4,
-	LEVEL_VERY_HOT		= 1 << 3,
-	LEVEL_HOT		= 1 << 2,
-};
-
-static struct msm_thermal_data msm_thermal_info;
-
-static struct delayed_work check_temp_work;
-
-unsigned short get_threshold(void)
-{
-	return temp_threshold;
-}
-
-static int msm_thermal_cpufreq_callback(struct notifier_block *nfb,
-		unsigned long event, void *data)
-{
-	struct cpufreq_policy *policy = data;
-
-	if (event != CPUFREQ_ADJUST && !info.pending_change)
-		return 0;
-
-	cpufreq_verify_within_limits(policy, policy->cpuinfo.min_freq,
-		info.limited_max_freq);
-
-	return 0;
-}
-
-static struct notifier_block msm_thermal_cpufreq_notifier = {
-	.notifier_call = msm_thermal_cpufreq_callback,
-};
-
-static void limit_cpu_freqs(uint32_t max_freq)
-{
-	unsigned int cpu;
-
-	if (info.limited_max_freq == max_freq)
-		return;
-
-	info.limited_max_freq = max_freq;
-
-	info.pending_change = true;
-
-	get_online_cpus();
-	for_each_online_cpu(cpu)
-	{
-		cpufreq_update_policy(cpu);
-		pr_info("%s: Setting cpu%d max frequency to %d\n",
-				KBUILD_MODNAME, cpu, info.limited_max_freq);
+	psm_kobj = kobject_create_and_add("pmic_sw_mode", module_kobj);
+	if (!psm_kobj) {
+		pr_err("cannot create psm kobject\n");
+		rc = -ENOMEM;
+		goto psm_node_exit;
 	}
-	put_online_cpus();
 
-	info.pending_change = false;
-}
+	for (i = 0; i < psm_rails_cnt; i++) {
+		psm_reg_kobj[i] = kobject_create_and_add(psm_rails[i].name,
+					psm_kobj);
+		if (!psm_reg_kobj[i]) {
+			pr_err("cannot create kobject for %s\n",
+					psm_rails[i].name);
+			rc = -ENOMEM;
+			goto psm_node_exit;
+		}
+		psm_rails[i].attr_gp.attrs = kzalloc( \
+				sizeof(struct attribute *) * 2, GFP_KERNEL);
+		if (!psm_rails[i].attr_gp.attrs) {
+			pr_err("kzalloc failed\n");
+			rc = -ENOMEM;
+			goto psm_node_exit;
+		}
 
-static void check_temp(struct work_struct *work)
-{
-	struct tsens_device tsens_dev;
-	uint32_t freq = 0;
-	long temp = 0;
+		PSM_RW_ATTRIB(psm_rails[i], psm_rails[i].mode_attr, 0, mode);
+		psm_rails[i].attr_gp.attrs[1] = NULL;
 
-	tsens_dev.sensor_num = msm_thermal_info.sensor_id;
-	tsens_get_temp(&tsens_dev, &temp);
-
-	if (info.throttling)
-	{
-		if (temp < (temp_threshold - info.safe_diff))
-		{
-			limit_cpu_freqs(info.cpuinfo_max_freq);
-			info.throttling = false;
-			goto reschedule;
+		rc = sysfs_create_group(psm_reg_kobj[i], &psm_rails[i].attr_gp);
+		if (rc) {
+			pr_err("cannot create attribute group for %s. err:%d\n",
+					psm_rails[i].name, rc);
+			goto psm_node_exit;
 		}
 	}
 
-	if (temp >= temp_threshold + LEVEL_HELL)
-		freq = FREQ_HELL;
-	else if (temp >= temp_threshold + LEVEL_VERY_HOT)
-		freq = FREQ_VERY_HOT;
-	else if (temp >= temp_threshold + LEVEL_HOT)
-		freq = FREQ_HOT;
-	else if (temp > temp_threshold)
-		freq = FREQ_WARM;
+	return rc;
 
-	if (freq)
-	{
-		limit_cpu_freqs(freq);
+psm_node_exit:
+	if (rc) {
+		for (i = 0; i < psm_rails_cnt; i++) {
+			kobject_del(psm_reg_kobj[i]);
+			kfree(psm_rails[i].attr_gp.attrs);
+		}
+		if (psm_kobj)
+			kobject_del(psm_kobj);
+	}
+	return rc;
+}
+
+static int get_efuse_temp_map(struct device_node *node,
+				int *efuse_values,
+				int *efuse_temp)
+{
+	uint32_t i, j, efuse_arr_cnt = 0;
+	int ret = 0, efuse_map_cnt = 0;
+	uint32_t data[2 * MAX_EFUSE_VALUE];
+
+	char *key = "qcom,efuse-temperature-map";
+	if (!of_get_property(node, key, &efuse_map_cnt)
+		|| efuse_map_cnt <= 0) {
+		pr_debug("Property %s not defined.\n", key);
+		return -ENODEV;
+	}
+
+	if (efuse_map_cnt % (sizeof(__be32) * 2)) {
+		pr_err("Invalid number(%d) of entry for %s\n",
+				efuse_map_cnt, key);
+		return -EINVAL;
+	}
+
+	efuse_arr_cnt = efuse_map_cnt / sizeof(__be32);
+
+	ret = of_property_read_u32_array(node, key, data, efuse_arr_cnt);
+	if (ret)
+		return -EINVAL;
+
+	efuse_map_cnt /= (sizeof(__be32) * 2);
+
+	j = 0;
+	for (i = 0; i < efuse_map_cnt; i++) {
+		efuse_values[i] = data[j++];
+		efuse_temp[i] = data[j++];
+	}
+
+	return efuse_map_cnt;
+}
+
+static int probe_thermal_efuse_read(struct device_node *node,
+			struct msm_thermal_data *data,
+			struct platform_device *pdev)
+{
+	u64 efuse_bits;
+	int ret = 0;
+	int i = 0;
+	int efuse_map_cnt = 0;
+	int efuse_data_cnt = 0;
+	char *key = NULL;
+	void __iomem *efuse_base = NULL;
+	uint32_t efuse_data[EFUSE_DATA_MAX] = {0};
+	uint32_t efuse_values[MAX_EFUSE_VALUE] = {0};
+	uint32_t efuse_temp[MAX_EFUSE_VALUE] = {0};
+	uint32_t default_temp = 0;
+	uint8_t thermal_efuse_data = 0;
+
+	if (default_temp_limit_probed)
+		goto read_efuse_exit;
+
+	key = "qcom,default-temp";
+	if (of_property_read_u32(node, key, &default_temp))
+		default_temp = 0;
+
+	default_cpu_temp_limit = default_temp;
+
+	key = "qcom,efuse-data";
+	if (!of_get_property(node, key, &efuse_data_cnt) ||
+		efuse_data_cnt <= 0) {
+		ret = -ENODEV;
+		goto read_efuse_fail;
+	}
+	efuse_data_cnt /= sizeof(__be32);
+
+	if (efuse_data_cnt != EFUSE_DATA_MAX) {
+		pr_err("Invalid number of efuse data. data cnt %d\n",
+			efuse_data_cnt);
+		ret = -EINVAL;
+		goto read_efuse_fail;
+	}
+
+	ret = of_property_read_u32_array(node, key, efuse_data,
+						efuse_data_cnt);
+	if (ret)
+		goto read_efuse_fail;
+
+	if (efuse_data[EFUSE_ADDRESS] == 0 ||
+		efuse_data[EFUSE_SIZE] == 0 ||
+		efuse_data[EFUSE_BIT_MASK] == 0) {
+		pr_err("Invalid efuse data: address:%x len:%d bitmask%x\n",
+			efuse_data[EFUSE_ADDRESS], efuse_data[EFUSE_SIZE],
+			efuse_data[EFUSE_BIT_MASK]);
+		ret = -EINVAL;
+		goto read_efuse_fail;
+	}
+
+	efuse_map_cnt = get_efuse_temp_map(node, efuse_values,
+						efuse_temp);
+	if (efuse_map_cnt <= 0 ||
+		efuse_map_cnt > (efuse_data[EFUSE_BIT_MASK] + 1)) {
+		pr_err("Invalid efuse-temperature-map. cnt%d\n",
+			efuse_map_cnt);
+		ret = -EINVAL;
+		goto read_efuse_fail;
+	}
+
+	efuse_base = ioremap(efuse_data[EFUSE_ADDRESS], efuse_data[EFUSE_SIZE]);
+	if (!efuse_base) {
+		pr_err("Unable to map efuse_addr:%x with size%d\n",
+			efuse_data[EFUSE_ADDRESS],
+			efuse_data[EFUSE_SIZE]);
+		ret = -EINVAL;
+		goto read_efuse_fail;
+	}
+
+	efuse_bits = readll_relaxed(efuse_base
+		+ efuse_data[EFUSE_ROW] * BYTES_PER_FUSE_ROW);
+
+	thermal_efuse_data = (efuse_bits >> efuse_data[EFUSE_START_BIT]) &
+						efuse_data[EFUSE_BIT_MASK];
+
+	/* Get cpu limit temp from efuse truth table */
+	for (; i < efuse_map_cnt; i++) {
+		if (efuse_values[i] == thermal_efuse_data) {
+			default_cpu_temp_limit = efuse_temp[i];
+			break;
+		}
+	}
+	if (i >= efuse_map_cnt) {
+		if (!default_temp) {
+			pr_err("No matching efuse value. value:%d\n",
+				thermal_efuse_data);
+			ret = -EINVAL;
+			goto read_efuse_fail;
+		}
+	}
+
+	pr_debug(
+	"Efuse address:0x%x [row:%d] = 0x%llx @%d:mask:0x%x = 0x%x temp:%d\n",
+		efuse_data[EFUSE_ADDRESS], efuse_data[EFUSE_ROW], efuse_bits,
+		efuse_data[EFUSE_START_BIT], efuse_data[EFUSE_BIT_MASK],
+		thermal_efuse_data, default_cpu_temp_limit);
+
+	default_temp_limit_enabled = true;
+
+read_efuse_fail:
+	if (efuse_base)
+		iounmap(efuse_base);
+	default_temp_limit_probed = true;
+	if (ret) {
+		if (!default_temp) {
+			dev_info(&pdev->dev,
+			"%s:Failed reading node=%s, key=%s. KTM continues\n",
+				__func__, node->full_name, key);
+		} else {
+			default_temp_limit_enabled = true;
+			pr_debug("Default cpu temp limit is %d\n",
+					default_cpu_temp_limit);
+			ret = 0;
+		}
+	}
+read_efuse_exit:
+	return ret;
+}
+
+static int probe_ocr(struct device_node *node, struct msm_thermal_data *data,
+		struct platform_device *pdev)
+{
+	int ret = 0;
+	int j = 0;
+	char *key = NULL;
+
+	if (ocr_probed) {
+		pr_info("%s: Nodes already probed\n",
+			__func__);
+		goto read_ocr_exit;
+	}
+	ocr_rails = NULL;
+
+	key = "qti,pmic-opt-curr-temp";
+	ret = of_property_read_u32(node, key, &data->ocr_temp_degC);
+	if (ret)
+		goto read_ocr_fail;
+
+	key = "qti,pmic-opt-curr-temp-hysteresis";
+	ret = of_property_read_u32(node, key, &data->ocr_temp_hyst_degC);
+	if (ret)
+		goto read_ocr_fail;
+
+	key = "qti,pmic-opt-curr-regs";
+	ocr_rail_cnt = of_property_count_strings(node, key);
+	ocr_rails = kzalloc(sizeof(struct psm_rail) * ocr_rail_cnt,
+			GFP_KERNEL);
+	if (!ocr_rails) {
+		pr_err("%s: Fail to allocate memory for ocr rails\n", __func__);
+		ocr_rail_cnt = 0;
+		return -ENOMEM;
+	}
+
+	for (j = 0; j < ocr_rail_cnt; j++) {
+		ret = of_property_read_string_index(node, key, j,
+				&ocr_rails[j].name);
+		if (ret)
+			goto read_ocr_fail;
+		ocr_rails[j].phase_reg = NULL;
+		ocr_rails[j].init = OPTIMUM_CURRENT_MAX;
+	}
+
+	if (ocr_rail_cnt) {
+		ret = ocr_reg_init(pdev);
+		if (ret) {
+			pr_info("%s:Failed to get regulators. KTM continues.\n",
+					__func__);
+			goto read_ocr_fail;
+		}
+		ocr_enabled = true;
+		ocr_nodes_called = false;
+		/*
+		 * Vote for max optimum current by default until we have made
+		 * our first temp reading
+		 */
+		if (ocr_set_mode_all(OPTIMUM_CURRENT_MAX))
+			pr_err("Set max optimum current failed\n");
+	}
+
+read_ocr_fail:
+	ocr_probed = true;
+	if (ret) {
+		dev_info(&pdev->dev,
+			"%s:Failed reading node=%s, key=%s. KTM continues\n",
+			__func__, node->full_name, key);
+		if (ocr_rails)
+			kfree(ocr_rails);
+		ocr_rails = NULL;
+		ocr_rail_cnt = 0;
+	}
+	if (ret == -EPROBE_DEFER)
+		ocr_probed = false;
+read_ocr_exit:
+	return ret;
+}
+
+static int probe_psm(struct device_node *node, struct msm_thermal_data *data,
+		struct platform_device *pdev)
+{
+	int ret = 0;
+	int j = 0;
+	char *key = NULL;
+
+	psm_rails = NULL;
+
+	key = "qcom,pmic-sw-mode-temp";
+	ret = of_property_read_u32(node, key, &data->psm_temp_degC);
+	if (ret)
+		goto read_node_fail;
+
+	key = "qcom,pmic-sw-mode-temp-hysteresis";
+	ret = of_property_read_u32(node, key, &data->psm_temp_hyst_degC);
+	if (ret)
+		goto read_node_fail;
+
+	key = "qcom,pmic-sw-mode-regs";
+	psm_rails_cnt = of_property_count_strings(node, key);
+	psm_rails = kzalloc(sizeof(struct psm_rail) * psm_rails_cnt,
+			GFP_KERNEL);
+	if (!psm_rails) {
+		pr_err("Fail to allocate memory for psm rails\n");
+		psm_rails_cnt = 0;
+		return -ENOMEM;
+	}
+
+	for (j = 0; j < psm_rails_cnt; j++) {
+		ret = of_property_read_string_index(node, key, j,
+				&psm_rails[j].name);
+		if (ret)
+			goto read_node_fail;
+	}
+
+	if (psm_rails_cnt) {
+		ret = psm_reg_init(pdev);
+		if (ret) {
+			pr_err("Err regulator init. err:%d. KTM continues.\n",
+					ret);
+			goto read_node_fail;
+		}
+		psm_enabled = true;
+	}
+
+read_node_fail:
+	psm_probed = true;
+	if (ret) {
+		dev_info(&pdev->dev,
+		"%s:Failed reading node=%s, key=%s. err=%d. KTM continues\n",
+			__func__, node->full_name, key, ret);
+		kfree(psm_rails);
+		psm_rails_cnt = 0;
+	}
+	if (ret == -EPROBE_DEFER)
+		psm_probed = false;
+	return ret;
+}
+
+static int probe_cc(struct device_node *node, struct msm_thermal_data *data,
+		struct platform_device *pdev)
+{
+	char *key = NULL;
+	uint32_t cpu_cnt = 0;
+	int ret = 0;
+	uint32_t cpu = 0;
 
 	if (num_possible_cpus() > 1) {
 		//core_control_enabled = 1;
 		hotplug_enabled = 1;
 	}
 
-reschedule:
-	schedule_delayed_work_on(0, &check_temp_work, msecs_to_jiffies(250));
+	key = "qcom,core-limit-temp";
+	ret = of_property_read_u32(node, key, &data->core_limit_temp_degC);
+	if (ret)
+		goto read_node_fail;
+
+	key = "qcom,core-temp-hysteresis";
+	ret = of_property_read_u32(node, key, &data->core_temp_hysteresis_degC);
+	if (ret)
+		goto read_node_fail;
+
+	key = "qcom,core-control-mask";
+	ret = of_property_read_u32(node, key, &data->core_control_mask);
+	if (ret)
+		goto read_node_fail;
+
+	key = "qcom,hotplug-temp";
+	ret = of_property_read_u32(node, key, &data->hotplug_temp_degC);
+	if (ret)
+		goto hotplug_node_fail;
+
+	key = "qcom,hotplug-temp-hysteresis";
+	ret = of_property_read_u32(node, key,
+			&data->hotplug_temp_hysteresis_degC);
+	if (ret)
+		goto hotplug_node_fail;
+
+	key = "qcom,cpu-sensors";
+	cpu_cnt = of_property_count_strings(node, key);
+	if (cpu_cnt < num_possible_cpus()) {
+		pr_err("Wrong number of cpu sensors:%d\n", cpu_cnt);
+		ret = -EINVAL;
+		goto hotplug_node_fail;
+	}
+
+	for_each_possible_cpu(cpu) {
+		ret = of_property_read_string_index(node, key, cpu,
+				&cpus[cpu].sensor_type);
+		if (ret)
+			goto hotplug_node_fail;
+	}
+
+read_node_fail:
+	if (ret) {
+		dev_info(&pdev->dev,
+		"%s:Failed reading node=%s, key=%s. err=%d. KTM continues\n",
+			KBUILD_MODNAME, node->full_name, key, ret);
+		core_control_enabled = 0;
+	}
+
+	return ret;
+
+hotplug_node_fail:
+	if (ret) {
+		dev_info(&pdev->dev,
+		"%s:Failed reading node=%s, key=%s. err=%d. KTM continues\n",
+			KBUILD_MODNAME, node->full_name, key, ret);
+		hotplug_enabled = 0;
+	}
+
+	return ret;
+}
+
+static int probe_therm_reset(struct device_node *node,
+		struct msm_thermal_data *data,
+		struct platform_device *pdev)
+{
+	char *key = NULL;
+	int ret = 0;
+
+	key = "qcom,therm-reset-temp";
+	ret = of_property_read_u32(node, key, &data->therm_reset_temp_degC);
+	if (ret)
+		goto PROBE_RESET_EXIT;
+
+	ret = init_threshold(MSM_THERM_RESET, MONITOR_ALL_TSENS,
+		data->therm_reset_temp_degC, data->therm_reset_temp_degC - 10,
+		therm_reset_notify);
+	if (ret) {
+		pr_err("Therm reset data structure init failed\n");
+		goto PROBE_RESET_EXIT;
+	}
+
+	therm_reset_enabled = true;
+
+PROBE_RESET_EXIT:
+	if (ret) {
+		dev_info(&pdev->dev,
+		"%s:Failed reading node=%s, key=%s err=%d. KTM continues\n",
+			__func__, node->full_name, key, ret);
+		therm_reset_enabled = false;
+	}
+	return ret;
+}
+
+static int probe_freq_mitigation(struct device_node *node,
+		struct msm_thermal_data *data,
+		struct platform_device *pdev)
+{
+	char *key = NULL;
+	int ret = 0;
+
+	key = "qcom,freq-mitigation-temp";
+	ret = of_property_read_u32(node, key, &data->freq_mitig_temp_degc);
+	if (ret)
+		goto PROBE_FREQ_EXIT;
+
+	key = "qcom,freq-mitigation-temp-hysteresis";
+	ret = of_property_read_u32(node, key,
+		&data->freq_mitig_temp_hysteresis_degc);
+	if (ret)
+		goto PROBE_FREQ_EXIT;
+
+	key = "qcom,freq-mitigation-value";
+	ret = of_property_read_u32(node, key, &data->freq_limit);
+	if (ret)
+		goto PROBE_FREQ_EXIT;
+
+	key = "qcom,freq-mitigation-control-mask";
+	ret = of_property_read_u32(node, key, &data->freq_mitig_control_mask);
+	if (ret)
+		goto PROBE_FREQ_EXIT;
+
+	freq_mitigation_enabled = 1;
+
+PROBE_FREQ_EXIT:
+	if (ret) {
+		dev_info(&pdev->dev,
+		"%s:Failed reading node=%s, key=%s. err=%d. KTM continues\n",
+			__func__, node->full_name, key, ret);
+		freq_mitigation_enabled = 0;
+	}
+	return ret;
 }
 
 static int __devinit msm_thermal_dev_probe(struct platform_device *pdev)
 {
 	int ret = 0;
+	char *key = NULL;
 	struct device_node *node = pdev->dev.of_node;
 	struct msm_thermal_data data;
 
 	pr_info("%s: msm_thermal_dev_probe begin...\n", KBUILD_MODNAME);
 
 	memset(&data, 0, sizeof(struct msm_thermal_data));
+	ret = msm_thermal_pre_init();
+	if (ret) {
+		pr_err("thermal pre init failed. err:%d\n", ret);
+		goto fail;
+	}
 
-	ret = of_property_read_u32(node, "qcom,sensor-id", &data.sensor_id);
+	key = "qcom,sensor-id";
+	ret = of_property_read_u32(node, key, &data.sensor_id);
 	if (ret)
-		return ret;
+		goto fail;
 
-	WARN_ON(data.sensor_id >= TSENS_MAX_SENSORS);
+	key = "qcom,poll-ms";
+	ret = of_property_read_u32(node, key, &data.poll_ms);
+	if (ret)
+		goto fail;
 
-        memcpy(&msm_thermal_info, &data, sizeof(struct msm_thermal_data));
+	key = "qcom,limit-temp";
+	ret = of_property_read_u32(node, key, &data.limit_temp_degC);
+	if (ret)
+		goto fail;
+
+	key = "qcom,temp-hysteresis";
+	ret = of_property_read_u32(node, key, &data.temp_hysteresis_degC);
+	if (ret)
+		goto fail;
+
+	key = "qcom,freq-step";
+	ret = of_property_read_u32(node, key, &data.bootup_freq_step);
+	if (ret)
+		goto fail;
+
+	key = "qcom,freq-control-mask";
+	ret = of_property_read_u32(node, key, &data.bootup_freq_control_mask);
+
+	ret = probe_cc(node, &data, pdev);
+
+	ret = probe_freq_mitigation(node, &data, pdev);
+	ret = probe_therm_reset(node, &data, pdev);
+
+	/*
+	 * Probe optional properties below. Call probe_psm before
+	 * probe_vdd_rstr because rpm_regulator_get has to be called
+	 * before devm_regulator_get
+	 * probe_ocr should be called after probe_vdd_rstr to reuse the
+	 * regualtor handle. calling devm_regulator_get more than once
+	 * will fail.
+	 */
+	ret = probe_psm(node, &data, pdev);
+	if (ret == -EPROBE_DEFER)
+		goto fail;
+	ret = probe_ocr(node, &data, pdev);
+	if (ret == -EPROBE_DEFER)
+		goto fail;
+	probe_thermal_efuse_read(node, &data, pdev);
+
+	/*
+	 * In case sysfs add nodes get called before probe function.
+	 * Need to make sure sysfs node is created again
+	 */
+	if (psm_nodes_called) {
+		msm_thermal_add_psm_nodes();
+		psm_nodes_called = false;
+	}
+	if (ocr_nodes_called) {
+		msm_thermal_add_ocr_nodes();
+		ocr_nodes_called = false;
+	}
+	if (default_temp_limit_nodes_called) {
+		msm_thermal_add_default_temp_limit_nodes();
+		default_temp_limit_nodes_called = false;
+	}
+	msm_thermal_ioctl_init();
+	ret = msm_thermal_init(&data);
+	msm_thermal_probed = true;
 
 	pr_info("%s: msm_thermal_dev_probe completed!\n", KBUILD_MODNAME);
 
@@ -2785,12 +2655,10 @@ fail:
 	return ret;
 }
 
-static int msm_thermal_dev_remove(struct platform_device *pdev)
+static int msm_thermal_dev_exit(struct platform_device *inp_dev)
 {
 	msm_thermal_ioctl_cleanup();
 	if (thresh) {
-		if (vdd_rstr_enabled)
-			kfree(thresh[MSM_VDD_RESTRICTION].thresh_list);
 		kfree(thresh);
 		thresh = NULL;
 	}
@@ -2805,25 +2673,24 @@ static struct of_device_id msm_thermal_match_table[] = {
 
 static struct platform_driver msm_thermal_device_driver = {
 	.probe = msm_thermal_dev_probe,
-	.remove = msm_thermal_dev_remove,
 	.driver = {
 		.name = "msm-thermal",
 		.owner = THIS_MODULE,
 		.of_match_table = msm_thermal_match_table,
 	},
+	.remove = msm_thermal_dev_exit,
 };
 
-static int __init msm_thermal_device_init(void)
+int __init msm_thermal_device_init(void)
 {
 	return platform_driver_register(&msm_thermal_device_driver);
 }
 
-static void __exit msm_thermal_device_exit(void)
+int __init msm_thermal_late_init(void)
 {
 	if (num_possible_cpus() > 1)
 		msm_thermal_add_cc_nodes();
 	msm_thermal_add_psm_nodes();
-	msm_thermal_add_vdd_rstr_nodes();
 	msm_thermal_add_ocr_nodes();
 	msm_thermal_add_default_temp_limit_nodes();
 
@@ -2831,6 +2698,7 @@ static void __exit msm_thermal_device_exit(void)
 	interrupt_mode_init();
 	return 0;
 }
+late_initcall(msm_thermal_late_init);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Praveen Chidambaram <pchidamb@codeaurora.org>");
