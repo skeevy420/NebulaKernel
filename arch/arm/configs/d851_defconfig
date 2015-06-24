@@ -3,7 +3,7 @@
 # Linux/arm 3.4.108 Kernel Configuration
 #
 #
-# 777 Kernel
+# NebulaKernel 07/01/2015
 #
 CONFIG_LOCALVERSION="-Nebula_Rev5.3_w/MultiRom_Support"
 

@@ -62,3 +62,4 @@ config LCD_NOTIFY
 	depends on FB_MSM_MDSS
 	bool "Enable LCD Notifier Helper"
 	default y
+	
