@@ -3,6 +3,9 @@
 #
 
 obj-$(CONFIG_THERMAL)		+= thermal_sys.o
+obj-$(CONFIG_INTELLI_THERMAL)	+= intelli/msm_thermal.o
+obj-$(CONFIG_INTELLI_THERMAL_V2)	+= intelli/msm_thermal_v2.o
+obj-$(CONFIG_INTELLI_THERMAL_V3)	+= intelli/msm_thermal_v3.o
 obj-$(CONFIG_THERMAL_MSM_POPMEM)	+= msm_popmem-tm.o
 obj-$(CONFIG_THERMAL_TSENS)	+= msm_tsens.o
 obj-$(CONFIG_THERMAL_TSENS8960) += msm8960_tsens.o
