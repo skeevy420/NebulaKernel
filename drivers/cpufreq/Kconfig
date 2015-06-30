@@ -291,7 +291,12 @@ config CPU_FREQ_DEFAULT_GOV_BARRY_ALLEN
 	  loading your cpufreq low-level hardware driver, using the
 	  'barry_allen' governor for latency-sensitive workloads.
 	  
-	  	   		  	  						
+config CPU_FREQ_DEFAULT_GOV_MYTHX_PLUG
+	bool "mythx_plug"
+	select CPU_FREQ_GOV_MYTHX_PLUG
+	help
+	
+		  	   		  	  						
 endchoice
 
 config CPU_FREQ_GOV_INTELLIACTIVE
@@ -801,7 +806,11 @@ config CPU_FREQ_GOV_BARRY_ALLEN
 
 	  If in doubt, say N.
 	  
-	  	  	
+config CPU_FREQ_GOV_MYTHX_PLUG
+	tristate "'mythx_plug' cpufreq governor"
+	depends on CPU_FREQ
+	
+		  	  	
 menu "x86 CPU frequency scaling drivers"
 depends on X86
 source "drivers/cpufreq/Kconfig.x86"
