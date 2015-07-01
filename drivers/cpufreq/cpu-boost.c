@@ -58,13 +58,6 @@ module_param(input_boost_ms, uint, 0644);
 static unsigned int migration_load_threshold = 15;
 module_param(migration_load_threshold, uint, 0644);
 
-static bool hotplug_boost = 1;
-module_param(hotplug_boost, bool, 0644);
-
-#ifdef CONFIG_LCD_NOTIFY
-bool wakeup_boost;
-module_param(wakeup_boost, bool, 0644);
-
 static bool load_based_syncs;
 module_param(load_based_syncs, bool, 0644);
 static u64 last_input_time;
