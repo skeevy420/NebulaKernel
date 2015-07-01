@@ -5,7 +5,7 @@
 #
 # 777 Kernel
 #
-CONFIG_LOCALVERSION="-AOSP-777-Kernel"
+CONFIG_LOCALVERSION="-Nebula_Rev5.3_w/MultiRom_Support"
 
 # TCP Options
 CONFIG_TCP_CONG_ADVANCED=y
