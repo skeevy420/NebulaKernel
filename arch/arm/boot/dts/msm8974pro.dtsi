@@ -1702,7 +1702,7 @@
 
                qcom,gpu-pwrlevel@3 {
                        reg = <3>;
-                       qcom,gpu-freq = <389000000>;=
+                       qcom,gpu-freq = <389000000>;
                        qcom,bus-freq = <7>;
                };
 
@@ -1724,7 +1724,7 @@
                        qcom,bus-freq = <0>;
                };
 
-               qcom,gpu-pwrlevel@7{
+               qcom,gpu-pwrlevel@7 {
                        reg = <7>;
                        qcom,gpu-freq = <27000000>;
                        qcom,bus-freq = <0>;
