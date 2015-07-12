@@ -3,10 +3,10 @@
 # Linux/arm 3.4.108 Kernel Configuration
 #
 #
-# NebulaKernel UpDated 07/07/2015
+# NebulaKernel UpDated 07/12/2015 For T-Mobile D851
 #
 ### Kernel Version Nfo ###
-CONFIG_LOCALVERSION="-Nebula_Rev6_w/MultiRom_Support"
+CONFIG_LOCALVERSION="-Nebula_Rev6.1_w/MultiRom_Support"
 
 #### Governors ###
 CONFIG_CPU_FREQ_GOV_ALUCARD=y
