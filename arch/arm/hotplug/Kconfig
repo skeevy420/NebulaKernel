@@ -1,14 +1,3 @@
-config INTELLI_HOTPLUG
-        bool "Enable intelli-plug cpu hotplug driver"
-        default n
-        help
-          Generic Intelli-plug cpu hotplug driver for ARM SOCs
-config ALUCARD_HOTPLUG
-	bool "Enable alucard-hotplug cpu hotplug driver"
-	default n
-	help
-	  Generic Alucard-hotplug cpu hotplug driver for ARM SOCs
-
 config MSM_HOTPLUG
 	bool "MSM hotplug driver"
 	depends on HOTPLUG_CPU
@@ -16,6 +5,34 @@ config MSM_HOTPLUG
 	help
 	  The MSM hotplug driver controls on-/offlining of additional cores based
 	  on current cpu load.
+
+config INTELLI_HOTPLUG
+	bool "Intelli hotplug driver"
+	depends on HOTPLUG_CPU
+	default n
+	help
+	  An intelligent cpu hotplug driver for
+	  Low Latency Frequency Transition capable processors.
+
+config BRICKED_HOTPLUG
+	bool "Enable kernel based mpdecision"
+	depends on MSM_RUN_QUEUE_STATS
+	default n
+	help
+	  This enables kernel based multi core control.
+	  (up/down hotplug based on load)
+
+config INTELLI_PLUG
+        bool "Enable intelli-plug cpu hotplug driver"
+        default n
+        help
+          Generic Intelli-plug cpu hotplug driver for ARM SOCs
+	  
+config ALUCARD_HOTPLUG
+	bool "Enable alucard-hotplug cpu hotplug driver"
+	default n
+	help
+	  Generic Alucard-hotplug cpu hotplug driver for ARM SOCs
 
 config ZEN_DECISION
 	bool "Zen Decision: MSM Userspace Handler"
@@ -44,13 +61,6 @@ config ZEN_DECISION
 	  services.
 
 	  If unsure, say N.
-config BRICKED_HOTPLUG
-	bool "Enable kernel based mpdecision"
-	depends on MSM_RUN_QUEUE_STATS
-	default n
-	help
-	 This enables kernel based multi core control.
-	 (up/down hotplug based on load)
 
 config ASMP
 	bool "Multi-core automatic hotplug support"
