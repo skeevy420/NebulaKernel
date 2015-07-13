@@ -35,12 +35,12 @@
  * It helps to keep variable names smaller, simpler
  */
 
-#define DEF_FREQUENCY_UP_THRESHOLD			CONFIG_LAGFREE_MAX_LOAD
-#define DEF_FREQUENCY_DOWN_THRESHOLD			CONFIG_LAGFREE_MIN_LOAD
-#define FREQ_STEP_DOWN 					CONFIG_LAGFREE_FREQ_STEP_DOWN
-#define FREQ_SLEEP_MAX 					CONFIG_LAGFREE_FREQ_SLEEP_MAX
-#define FREQ_AWAKE_MIN 					CONFIG_LAGFREE_FREQ_AWAKE_MIN
-#define FREQ_STEP_UP_SLEEP_PERCENT 			CONFIG_LAGFREE_FREQ_STEP_UP_SLEEP_PERCENT
+#define DEF_FREQUENCY_UP_THRESHOLD			(50)
+#define DEF_FREQUENCY_DOWN_THRESHOLD		(15)
+#define FREQ_STEP_DOWN 						(160000)
+#define FREQ_SLEEP_MAX 						(320000)
+#define FREQ_AWAKE_MIN 						(480000)
+#define FREQ_STEP_UP_SLEEP_PERCENT 			(20)
 
 /*
  * The polling frequency of this governor depends on the capability of
@@ -106,6 +106,20 @@ static struct dbs_tuners dbs_tuners_ins = {
 	.ignore_nice = 1,
 	//.freq_step = 5,
 };
+
+static inline unsigned int get_cpu_idle_time(unsigned int cpu)
+{
+	unsigned int add_nice = 0, ret;
+
+	if (dbs_tuners_ins.ignore_nice)
+		add_nice = kstat_cpu(cpu).cpustat.nice;
+
+	ret = kstat_cpu(cpu).cpustat.idle +
+		kstat_cpu(cpu).cpustat.iowait +
+		add_nice;
+
+	return ret;
+}
 
 /* keep track of frequency transitions */
 static int
@@ -603,11 +617,23 @@ struct cpufreq_governor cpufreq_gov_lagfree = {
 	.owner			= THIS_MODULE,
 };
 
+static void lagfree_early_suspend(struct early_suspend *handler) {
+	suspended = 1;
+}
+
+static void lagfree_late_resume(struct early_suspend *handler) {
+	suspended = 0;
+}
+
+static struct early_suspend lagfree_power_suspend = {
+	.suspend = lagfree_early_suspend,
+	.resume = lagfree_late_resume,
+	.level = EARLY_SUSPEND_LEVEL_DISABLE_FB + 1,
+};
+
 static int __init cpufreq_gov_dbs_init(void)
 {
-#ifdef CONFIG_HAS_EARLYSUSPEND
 	register_early_suspend(&lagfree_power_suspend);
-#endif
 	return cpufreq_register_governor(&cpufreq_gov_lagfree);
 }
 
@@ -615,9 +641,8 @@ static void __exit cpufreq_gov_dbs_exit(void)
 {
 	/* Make sure that the scheduled work is indeed not running */
 	flush_scheduled_work();
-#ifdef CONFIG_HAS_EARLYSUSPEND
+
 	unregister_early_suspend(&lagfree_power_suspend);
-#endif
 	cpufreq_unregister_governor(&cpufreq_gov_lagfree);
 }
 
@@ -635,5 +660,3 @@ fs_initcall(cpufreq_gov_dbs_init);
 module_init(cpufreq_gov_dbs_init);
 #endif
 module_exit(cpufreq_gov_dbs_exit); 
-
-
