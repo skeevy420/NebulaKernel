@@ -236,7 +236,6 @@ static int __cpuinit msm_cpufreq_init(struct cpufreq_policy *policy)
 	int ret = 0;
 	struct cpufreq_frequency_table *table;
 	struct cpufreq_work_struct *cpu_work = NULL;
-	int cpu;
 
 	table = cpufreq_frequency_get_table(policy->cpu);
 	if (table == NULL)
