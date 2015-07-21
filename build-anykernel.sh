@@ -19,7 +19,7 @@ KERNEL="zImage"
 DTBIMAGE="dtb"
 
 # Kernel Details
-VER=Render-Kernel
+VER=NebulaKernel
 REV="Rev6.5"
 
 # Vars
