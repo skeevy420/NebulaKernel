@@ -20,23 +20,24 @@ DTBIMAGE="dtb"
 
 # Kernel Details
 VER=Render-Kernel
+REV="Rev6.5"
 
 # Vars
 export LOCALVERSION=~`echo $VER`
-export CROSS_COMPILE=${HOME}/android/source/toolchains/UBER-arm-eabi-4.9-cortex-a15-041915/bin/arm-eabi-
+export CROSS_COMPILE=${HOME}/Builds/KERNEL-SOURCE/toolchains/UBER-arm-eabi-4.9-cortex-a15-041915/bin/arm-eabi-
 export ARCH=arm
 export SUBARCH=arm
-export KBUILD_BUILD_USER=RenderBroken
-export KBUILD_BUILD_HOST=RenderServer.net
+export KBUILD_BUILD_USER=Eliminater74
+export KBUILD_BUILD_HOST=HP_ENVY_dv7.com
 export CCACHE=ccache
 
 # Paths
 KERNEL_DIR=`pwd`
-REPACK_DIR="${HOME}/android/source/kernel/G2-AnyKernel"
-PATCH_DIR="${HOME}/android/source/kernel/G2-AnyKernel/patch"
-MODULES_DIR="${HOME}/android/source/kernel/G2-AnyKernel/modules"
-ZIP_MOVE="${HOME}/android/source/zips/g2-zips"
-ZIMAGE_DIR="${HOME}/android/source/kernel/msm8974_G2_render_kernel/arch/arm/boot"
+REPACK_DIR="${HOME}/Builds/KERNEL-SOURCE/G3-AnyKernel"
+PATCH_DIR="${HOME}/Builds/KERNEL-SOURCE/G3-AnyKernel/patch"
+MODULES_DIR="${HOME}/Builds/KERNEL-SOURCE/G3-AnyKernel/modules"
+ZIP_MOVE="${HOME}/Builds/KERNEL-SOURCE/zips/g3-zips"
+ZIMAGE_DIR="${HOME}/Builds/KERNEL-SOURCE/NebulaKernel/arch/arm/boot"
 
 # Functions
 function clean_all {
@@ -67,8 +68,8 @@ function make_dtb {
 
 function make_zip {
 		cd $REPACK_DIR
-		zip -r9 RenderKernel-AOSP_"$VARIANT"-R.zip *
-		mv RenderKernel-AOSP_"$VARIANT"-R.zip $ZIP_MOVE
+		zip -r9 NebulaKernel_"$REV"_MR_"$VARIANT".zip *
+		mv NebulaKernel_"$REV"_MR_"$VARIANT".zip $ZIP_MOVE
 		cd $KERNEL_DIR
 }
 
@@ -76,45 +77,42 @@ function make_zip {
 DATE_START=$(date +"%s")
 
 echo -e "${green}"
-echo "Render Kernel Creation Script:"
+echo "NebulaKerrnel Creation Script:"
 echo -e "${restore}"
 
 echo "Pick VARIANT..."
-select choice in d800 d801 d802 d803 ls980 vs980 f320x l01f
+select choice in d850 d851 d852 d855 d855-low ls990 vs985
 do
 case "$choice" in
-	"d800")
-		VARIANT="d800"
-		DEFCONFIG="d800_defconfig"
+	"d850")
+		VARIANT="d850"
+		DEFCONFIG="d850_defconfig"
 		break;;
-	"d801")
-		VARIANT="d801"
-		DEFCONFIG="d801_defconfig"
+	"d851")
+		VARIANT="d851"
+		DEFCONFIG="d851_defconfig"
 		break;;
-	"d802")
-		VARIANT="d802"
-		DEFCONFIG="d802_defconfig"
+	"d852")
+		VARIANT="d852"
+		DEFCONFIG="d852_defconfig"
 		break;;
-	"d803")
-		VARIANT="d803"
-		DEFCONFIG="d803_defconfig"
+	"d855")
+		VARIANT="d855"
+		DEFCONFIG="d855_defconfig"
 		break;;
-	"ls980")
-		VARIANT="ls980"
-		DEFCONFIG="ls980_defconfig"
+	"d855-low")
+		VARIANT="d855-low"
+		DEFCONFIG="d855_lowmem_defconfig"
 		break;;
-	"vs980")
-		VARIANT="vs980"
-		DEFCONFIG="vs980_defconfig"
+	"ls990")
+		VARIANT="ls990"
+		DEFCONFIG="ls990_defconfig"
 		break;;
-	"f320x")
-		VARIANT="f320x"
-		DEFCONFIG="f320x_defconfig"
+	"vs985")
+		VARIANT="vs985"
+		DEFCONFIG="vs985_defconfig"
 		break;;
-	"l01f")
-		VARIANT="l01f"
-		DEFCONFIG="l01f_defconfig"
-		break;;
+		
 esac
 done
 
