@@ -1,5 +1,5 @@
 ### HotPlugs ###
-obj-y	:= intelli_plug.o bricked_hotplug.o msm_zen_decision.o alucard_hotplug.o msm_hotplug.o mako_hotplug.o autosmp.o blu_plug.o
+obj-y	:= intelli_plug.o bricked_hotplug.o msm_zen_decision.o alucard_hotplug.o msm_hotplug.o mako_hotplug.o autosmp.o
 
 obj-$(CONFIG_MSM_HOTPLUG) += msm_hotplug.o
 #obj-$(CONFIG_INTELLI_HOTPLUG) += intelli_hotplug.o
