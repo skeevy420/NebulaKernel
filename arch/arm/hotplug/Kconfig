@@ -76,4 +76,10 @@ config BLU_PLUG
 	default n
 	help
 	  The Dynamic hotplug driver automatically online/offline CPUs proportional to system load.
+	  
+config MSM_SLEEPER
+	bool "CPU hotplug driver"
+	default n
+	help
+	  CPU hotplug driver	  
 
