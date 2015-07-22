@@ -1,10 +1,24 @@
 #!/bin/bash
 
 ###########################################################################################
+# NebulaKernel Build Script (C) 2015                                                      #
+#                                                                                         #
+#                                                                                         #
 # Build Script W/AnyKernel V2 Support Plus        07/22/2015                              #
 #                                                                                         #
 # Added: Random+YYYYMMDD Format at end of zip                                             #
 # Added: SignApk to sign all zips                                                         #
+# Added Build.log Error Only or Full Log                                                  #
+#                                                                                         #
+#                                                                                         #
+#                                                                                         #
+#                                                                                         #
+#                                                                                         #
+#                                                                                         #
+#                                                                                         #
+#                                                                                         #
+#                                                                                         #
+#                                                                                         #
 #                                                                                         #
 ###########################################################################################
 
@@ -24,7 +38,7 @@ DTBIMAGE="dtb"
 # Kernel Details
 VER=NebulaKernel
 REV="Rev6.5"
-BDATE=$(date +"%Y%m%d")
+#BDATE=$(date +"%Y%m%d")
 KVER="$RANDOM"_$(date +"%Y%m%d")
 
 
@@ -52,12 +66,35 @@ ZIMAGE_DIR="${HOME}/Builds/KERNEL-SOURCE/NebulaKernel/arch/arm/boot"
 # Functions
 function clean_all {
 		rm -rf $MODULES_DIR/*
+		#rm -rf ~/.ccache
 		cd $REPACK_DIR
 		rm -rf $KERNEL
 		rm -rf $DTBIMAGE
+		rm -rf *.zip
 		cd $KERNEL_DIR
+		echo "Deleting arch/arm/boot/*.dtb's"
+		rm -rf arch/arm/boot/*dtb
+		echo "Deleting arch/arm/boot/zImage*"
+		rm -rf arch/arm/boot/zImage*
+		echo "Deleting arch/arm/boot/Image*"
+		rm -rf arch/arm/boot/Image*
+		echo "Deleting firmware/synaptics/g3/*.gen.*"
+		rm -rf firmware/synaptics/g3/*gen*
 		echo
 		make clean && make mrproper
+}
+
+function change_variant {
+		cd $REPACK_DIR
+        sed -i 's/d850/$VARIANT/g; s/d851/$VARIANT/g; s/d852/$VARIANT/g; s/d855/$VARIANT/g; s/f400/$VARIANT/g; s/ls990/$VARIANT/g; s/vs985/$VARIANT/g/g' anykernel.sh
+		UP_CASE=$VARIANT | tr '[:upper:]' '[:lower:]'
+		sed -i 's/D850/$VARIANT/g; s/D851/$VARIANT/g; s/D852/$VARIANT/g; s/D855/$VARIANT/g; s/F400/$VARIANT/g; s/LS990/$VARIANT/g; s/VS985/$VARIANT/g/g' anykernel.sh
+		cd $KERNEL_DIR
+}
+
+function build_log {
+		rm -rf build.log
+        exec 2> >(sed -r 's/'$(echo -e "\033")'\[[0-9]{1,2}(;([0-9]{1,2})?)?[mK]//g' | tee -a build.log)
 }
 
 function make_kernel {
@@ -79,8 +116,10 @@ function make_dtb {
 function make_zip {
 		cd $REPACK_DIR
 		zip -r9 NebulaKernel_"$REV"_MR_"$VARIANT"_"$KVER".zip *
-		java -jar $SIGNAPK $SIGNAPK_KEYS/testkey.x509.pem $SIGNAPK_KEYS/testkey.pk8 NebulaKernel_"$REV"_MR_"$VARIANT"_"$KVER".zip NebulaKernel_"$REV"_MR_"$VARIANT"_"$KVER"-signed.zip
-		mv NebulaKernel_"$REV"_MR_"$VARIANT"_"$KVER"-signed.zip $ZIP_MOVE
+		#java -jar $SIGNAPK $SIGNAPK_KEYS/testkey.x509.pem $SIGNAPK_KEYS/testkey.pk8 NebulaKernel_"$REV"_MR_"$VARIANT"_"$KVER".zip NebulaKernel_"$REV"_MR_"$VARIANT"_"$KVER"-signed.zip
+		#mv NebulaKernel_"$REV"_MR_"$VARIANT"_"$KVER"-signed.zip $ZIP_MOVE
+		mv NebulaKernel_"$REV"_MR_"$VARIANT"_"$KVER".zip $ZIP_MOVE
+		rm -rf NebulaKernel_"$REV"_MR_"$VARIANT"_"$KVER".zip
 		cd $KERNEL_DIR
 }
 
@@ -130,7 +169,7 @@ case "$choice" in
 esac
 done
 
-while read -p "Do you want to Make clean and propper (y/n)? " cchoice
+while read -p "Do you want to Make clean,mrproper and clear ccache (Y/n)? " cchoice
 do
 case "$cchoice" in
 	y|Y )
@@ -156,6 +195,7 @@ while read -p "Are you sure you want to build the kernel (y/n)? " dchoice
 do
 case "$dchoice" in
 	y|Y)
+		#build_log
 		make_kernel
 		make_dtb
 		make_modules

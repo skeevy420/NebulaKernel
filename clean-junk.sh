@@ -5,6 +5,7 @@ for i in `find . -type f \( -iname \*.rej \
                                 -o -iname \*.bkp \
                                 -o -iname \*.ko \
                                 -o -iname \*.patch \
+								 -o -iname \*.gen.* \
                                 -o -iname \*.patch.[0-9]* \
                                 -o -iname \*.c.BACKUP.[0-9]*.c \
                                 -o -iname \*.c.BASE.[0-9]*.c \
