@@ -1,9 +1,12 @@
 #!/bin/bash
 
-#
-#  Build Script for Render Kernel for G2!
-#  Based off AK'sbuild script - Thanks!
-#
+###########################################################################################
+# Build Script W/AnyKernel V2 Support Plus        07/22/2015                              #
+#                                                                                         #
+# Added: Random+YYYYMMDD Format at end of zip                                             #
+# Added: SignApk to sign all zips                                                         #
+#                                                                                         #
+###########################################################################################
 
 # Bash Color
 green='\033[01;32m'
@@ -21,6 +24,9 @@ DTBIMAGE="dtb"
 # Kernel Details
 VER=NebulaKernel
 REV="Rev6.5"
+BDATE=$(date +"%Y%m%d")
+KVER="$RANDOM"_$(date +"%Y%m%d")
+
 
 # Vars
 export LOCALVERSION=~`echo $VER`
@@ -36,7 +42,11 @@ KERNEL_DIR=`pwd`
 REPACK_DIR="${HOME}/Builds/KERNEL-SOURCE/G3-AnyKernel"
 PATCH_DIR="${HOME}/Builds/KERNEL-SOURCE/G3-AnyKernel/patch"
 MODULES_DIR="${HOME}/Builds/KERNEL-SOURCE/G3-AnyKernel/modules"
-ZIP_MOVE="${HOME}/Builds/KERNEL-SOURCE/zips/g3-zips"
+TOOLS_DIR="${HOME}/Builds/KERNEL-SOURCE/G3-AnyKernel/tools"
+RAMDISK_DIR="${HOME}/Builds/KERNEL-SOURCE/G3-AnyKernel/ramdisk"
+SIGNAPK="${HOME}/Builds/KERNEL-SOURCE/SignApk/signapk.jar"
+SIGNAPK_KEYS="${HOME}/Builds/KERNEL-SOURCE/SignApk"
+ZIP_MOVE="${HOME}/Builds/KERNEL-SOURCE/zips"
 ZIMAGE_DIR="${HOME}/Builds/KERNEL-SOURCE/NebulaKernel/arch/arm/boot"
 
 # Functions
@@ -68,8 +78,9 @@ function make_dtb {
 
 function make_zip {
 		cd $REPACK_DIR
-		zip -r9 NebulaKernel_"$REV"_MR_"$VARIANT".zip *
-		mv NebulaKernel_"$REV"_MR_"$VARIANT".zip $ZIP_MOVE
+		zip -r9 NebulaKernel_"$REV"_MR_"$VARIANT"_"$KVER".zip *
+		java -jar $SIGNAPK $SIGNAPK_KEYS/testkey.x509.pem $SIGNAPK_KEYS/testkey.pk8 NebulaKernel_"$REV"_MR_"$VARIANT"_"$KVER".zip NebulaKernel_"$REV"_MR_"$VARIANT"_"$KVER"-signed.zip
+		mv NebulaKernel_"$REV"_MR_"$VARIANT"_"$KVER"-signed.zip $ZIP_MOVE
 		cd $KERNEL_DIR
 }
 
@@ -80,8 +91,8 @@ echo -e "${green}"
 echo "NebulaKerrnel Creation Script:"
 echo -e "${restore}"
 
-echo "Pick VARIANT..."
-select choice in d850 d851 d852 d855 d855-low ls990 vs985
+echo "Pick LG G3 VARIANT..."
+select choice in d850 d851 d852 d855 d855-low f400 ls990 vs985
 do
 case "$choice" in
 	"d850")
@@ -112,11 +123,14 @@ case "$choice" in
 		VARIANT="vs985"
 		DEFCONFIG="vs985_defconfig"
 		break;;
-		
+	"f400")
+		VARIANT="f400"
+		DEFCONFIG="f400_defconfig"
+		break;;	
 esac
 done
 
-while read -p "Do you want to clean stuffs (y/n)? " cchoice
+while read -p "Do you want to Make clean and propper (y/n)? " cchoice
 do
 case "$cchoice" in
 	y|Y )
@@ -138,7 +152,7 @@ done
 
 echo
 
-while read -p "Do you want to build kernel (y/n)? " dchoice
+while read -p "Are you sure you want to build the kernel (y/n)? " dchoice
 do
 case "$dchoice" in
 	y|Y)
@@ -160,9 +174,11 @@ esac
 done
 
 echo -e "${green}"
-echo "-------------------"
+echo "--------------------------------------------------------"
+echo "NebulaKernel_'$REV'_MR_'$VARIANT'_'$KVER'-signed.zip"
+echo "Created Successfully.."
 echo "Build Completed in:"
-echo "-------------------"
+echo "--------------------------------------------------------"
 echo -e "${restore}"
 
 DATE_END=$(date +"%s")
