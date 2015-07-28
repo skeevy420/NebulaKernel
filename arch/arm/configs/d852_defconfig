@@ -6,7 +6,7 @@
 # NebulaKernel UpDated 07/12/2015 For T-Mobile D851
 #
 ### Kernel Version Nfo ###
-CONFIG_LOCALVERSION="-Nebula_Rev6.6_w/MultiRom_Support"
+CONFIG_LOCALVERSION="-Nebula_Rev6.7_w/MultiRom_Support"
 
 CONFIG_CPU_FREQ=y
 CONFIG_CPU_FREQ_TABLE=y
