@@ -78,8 +78,14 @@ config BLU_PLUG
 	  The Dynamic hotplug driver automatically online/offline CPUs proportional to system load.
 	  
 config MSM_SLEEPER
-	bool "CPU hotplug driver"
+	bool "Limit max frequency while screen is off"
 	default n
 	help
-	  CPU hotplug driver	  
+	  Limit max frequency while screen is off
+	  
+config FAST_HOTPLUG
+	bool "Enable fast hotplug"
+	default n
+	help
+	  Kernel based core control.	  	  
 
