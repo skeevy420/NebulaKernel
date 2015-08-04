@@ -12,9 +12,9 @@
 # Added: Automatic change anykernel.sh device settings                                    #
 # Added: Dialog Menu system for nice clean easy GUI environment                           #
 # Added: Fail Safe method for When Builds End                                             #
-# Added: batch Buil                                                                       #
-#                                                                                         #
-#                                                                                         #
+# Added: batch Build                                                                      #
+# Added: External Configure File For easy editing                                         #
+# Added: Bump Version on all Defconfigs, ZipNames and anykernel.sh                        #
 #                                                                                         #
 #                                                                                         #
 #                                                                                         #
@@ -39,17 +39,26 @@ restore='\033[0m'
 
 clear
 
+if [ -e build-anykernel.cfg ]
+then
+echo "Reading config...." >&2
+source "$PWD/build-anykernel.cfg"
+else
+echo "Configure File is missing..."
+exit
+fi
+
 # Resources
 THREAD="-j$(grep -c ^processor /proc/cpuinfo)"
 KERNEL="zImage"
 DTBIMAGE="dtb"
 
 # Kernel Details
-VER=NebulaKernel
-REV="Rev6.6"
-DEVICES="d850;d851;d852;d855;d855_lowmem;f400;ls990;vs985"
+VER="$VER" >&2
+REV="$REV" >&2
+DEVICES="$DEVICES" >&2
 #BDATE=$(date +"%Y%m%d")
-KVER="$RANDOM"_$(date +"%Y%m%d")
+KVER="$KVER" >&2
 
 
 # Vars
@@ -60,20 +69,22 @@ export SUBARCH=arm
 export KBUILD_BUILD_USER=Eliminater74
 export KBUILD_BUILD_HOST=HP_ENVY_dv7.com
 export CCACHE=ccache
-export ERROR_LOG=ERRORS
+export ERROR_LOG="ERRORS"
 
 # Paths
-KERNEL_DIR=`pwd`
-REPACK_DIR="${HOME}/Builds/KERNEL-SOURCE/G3-AnyKernel"
-PATCH_DIR="${HOME}/Builds/KERNEL-SOURCE/G3-AnyKernel/patch"
-MODULES_DIR="${HOME}/Builds/KERNEL-SOURCE/G3-AnyKernel/modules"
-TOOLS_DIR="${HOME}/Builds/KERNEL-SOURCE/G3-AnyKernel/tools"
-RAMDISK_DIR="${HOME}/Builds/KERNEL-SOURCE/G3-AnyKernel/ramdisk"
-SIGNAPK="${HOME}/Builds/KERNEL-SOURCE/SignApk/signapk.jar"
-SIGNAPK_KEYS="${HOME}/Builds/KERNEL-SOURCE/SignApk"
-ZIP_MOVE="${HOME}/Builds/KERNEL-SOURCE/zips"
-COPY_ZIP="${HOME}/public_html/NebulaKernel"
-ZIMAGE_DIR="${HOME}/Builds/KERNEL-SOURCE/NebulaKernel/arch/arm/boot"
+KERNEL_DIR="$KERNEL_DIR" >&2
+REPACK_DIR="$REPACK_DIR" >&2
+PATCH_DIR="$PATCH_DIR" >&2
+MODULES_DIR="$MODULES_DIR" >&2
+TOOLS_DIR="$TOOLS_DIR" >&2
+RAMDISK_DIR="$RAMDISK_DIR" >&2
+SIGNAPK="$SIGNAPK" >&2
+SIGNAPK_KEYS="$SIGNAPK_KEYS" >&2
+DEFCONFIGS="$DEFCONFIGS" >&2
+ZIP_MOVE="$ZIP_MOVE" >&2
+COPY_ZIP="$COPY_ZIP" >&2
+ZIMAGE_DIR="$ZIMAGE_DIR" >&2
+
 
 # Functions
 
@@ -194,6 +205,39 @@ function pipe_output() {
 	dialog --title "$title" --tailbox screen.log 25 140
 }
 
+## Bump all Defconfigs ##
+function bump_defconfigs() {
+	dialog --inputbox \
+		"What is your username?" 0 0 2> /tmp/inputbox.tmp.$$
+		retval=$?
+		input=`cat /tmp/inputbox.tmp.$$`
+		rm -f /tmp/inputbox.tmp.$$
+		case $retval in
+		0)
+		echo "Your username is '$input'"
+		BUMP_REV="$input"
+		REV="$input";;
+		1)
+		echo "Cancel pressed.";;
+		esac
+		echo sed -i '17s/.*/REV="'$REV'"/' build-anykernel.cfg
+		#sed -i '17s/.*/REV="'$REV'"/' build-anykernel.cfg
+		OIFS=$IFS
+		IFS=';'
+		arr2=$DEVICES
+		for x in $arr2
+		do
+		DEFCONFIG="${x}_defconfig"
+		echo $DEFCONFIG and $BUMP_REV
+		cd $DEFCONFIGS
+		echo "$DEFCONFIGS"
+		#sed -i '9s/.*/CONFIG_LOCALVERSION="-Nebula_'$BUMP_REV'_w/MultiRom_Support"'/' $DEFCONFIG
+		cd $KERNEL_DIR
+done
+
+IFS=$OIFS
+exit
+}
 
 ## Batch Build ##
 function build_all() {
@@ -397,27 +441,33 @@ dialog --clear  --help-button --backtitle "Linux Shell Script Tutorial" \
 letter of the choice as a hot key, or the \n\
 number keys 1-5 to choose an option.\n\
 Choose the TASK" 15 50 4 \
-	BKernel "Build Kernels" \
-	Log	"Logging Options [Log: $ERROR_LOG]" \
-	Clean "Clean Source" \
-	Test "Section For Testing New Stuff" \
-	Exit "Exit to the shell" 2>"${INPUT}"
+	"Build" "Build Kernels" \
+	"Clean"	"Clean Builds" \
+	"Log" "Logging Options [Log: $ERROR_LOG]" \
+	"Bump" "Bump Version" \
+	"Test" "Testing Stage Area" \
+	"2Test" "Test 2" \
+	"Exit" "Exit to the shell" 2>"${INPUT}"
  
 	menuitem=$(<"${INPUT}")
  
  
 # make decsion 
 case $menuitem in
-	BKernel) build_kernels;;
-	Log) menu_log;;
-	Clean) clean_all ;;
-	Test) build_all;;
-	Exit) echo "Bye"; break;;
-	255) echo "Cancel"; break;;
+		Build) build_kernels ;;
+		Clean) clean_all ;;
+		Log) menu_log ;;
+		Test) bump_defconfigs ;;
+		2Test) echo "kernel: $KERNEL_DIR and $ZIMAGE_DIR"; exit ;;
+		Exit) echo "Bye"; exit;;
+		Cancel) exit ;;
+		255) echo "Cancel"; exit;;
 esac
  
  done
 }
+
+#### Main Menu Start ####
 main() {
     main_menu
 }
