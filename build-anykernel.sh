@@ -63,7 +63,7 @@ KVER="$KVER" >&2
 
 # Vars
 export LOCALVERSION=~`echo $VER`
-export CROSS_COMPILE=${HOME}/Builds/KERNEL-SOURCE/toolchains/arm-eabi-6.0/bin/arm-eabi-
+export CROSS_COMPILE=${HOME}/Builds/KERNEL-SOURCE/toolchains/arm-eabi-5.1/bin/arm-eabi-
 export ARCH=arm
 export SUBARCH=arm
 export KBUILD_BUILD_USER=Eliminater74
