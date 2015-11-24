@@ -12,10 +12,20 @@ cat << CTAG
 					description:"><^>< UKM V5.2.0 Nebua Edition ><^><"
 				}},
 			{ SLiveLabel:{
-				title:"BusyBox Version",
+				title:"BusyBox Latest Version",
 			refresh:10000000,
 			style:"bold",
-			action:"live BusyBoxVer"
+			action:"busybox BusyBox_kernel"
+		}},
+		{ SLiveLabel:{
+				title:"BusyBox current version:",
+			refresh:10000000,
+			style:"bold",
+			action:"busybox BusyBox_system"
+		}},
+		{ SButton:{
+		label:"Update BusyBox",
+		action:"`$BB sh /sbin/nebula/busybox.sh`"
 		}},
 				{ SPane:{
 			title:"Special Features",
