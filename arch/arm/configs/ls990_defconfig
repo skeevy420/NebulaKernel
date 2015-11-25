@@ -6,7 +6,7 @@
 # NebulaKernel UpDated 08/09/2015 LS990 Sprint
 #
 #########KERNEL-INFO####################################
-CONFIG_LOCALVERSION="-Nebula_Rev10.1-OC3-Experimental"
+CONFIG_LOCALVERSION="-Nebula_Rev10.3-T2-Synapse-Experimental"
 #########################################################
 #########################################################
 
@@ -373,6 +373,7 @@ CONFIG_HAVE_CLK=y
 CONFIG_HAVE_DMA_API_DEBUG=y
 CONFIG_HAVE_HW_BREAKPOINT=y
 CONFIG_HAVE_ARCH_JUMP_LABEL=y
+CONFIG_HAVE_ARCH_SECCOMP_FILTER=y
 
 #
 # GCOV-based kernel profiling
@@ -3454,6 +3455,10 @@ CONFIG_STAGING=y
 # CONFIG_IIO is not set
 CONFIG_ZRAM=y
 # CONFIG_ZRAM_DEBUG is not set
+# CONFIG_ZRAM_DEBUG is not set
+# CONFIG_ZRAM_LZ4 is not set
+# CONFIG_ZRAM_LZO is not set
+CONFIG_ZRAM_SNAPPY=y
 CONFIG_ZSMALLOC=y
 # CONFIG_FB_SM7XX is not set
 # CONFIG_BCM_WIMAX is not set
@@ -3493,6 +3498,8 @@ CONFIG_ANDROID_LMK_ADJ_RBTREE=y
 #
 # CONFIG_PRIMA_WLAN is not set
 # CONFIG_PRONTO_WLAN is not set
+CONFIG_SNAPPY_COMPRESS=y
+CONFIG_SNAPPY_DECOMPRESS=y
 
 #
 # Qualcomm MSM specific device drivers

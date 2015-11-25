@@ -1,0 +1,76 @@
+UKM=/res/synapse;
+BB=/sbin/bb/busybox;
+DEVICE=`sh $UKM/device/.device.sh`;
+
+bool() {
+  [ `$BB cat $1` == "Y" ] && $BB echo "1";
+  [ `$BB cat $1` == "N" ] && $BB echo "0";
+}
+
+# Mount root as RW to apply tweaks and settings
+$BB mount -t rootfs -o remount,rw rootfs;
+$BB mount -o remount,rw /;
+
+cat << CTAG
+{
+    sections: [
+		`if [ -n "$DEVICE" ]; then
+			. $UKM/json.gen.info
+			$BB echo ','
+			. $UKM/json.gen.about
+			$BB echo ','
+			. $UKM/json.gen.live
+			$BB echo ','
+			. $UKM/json.gen.cpuplus
+			$BB echo ','
+			. $UKM/json.gen.cpu
+			$BB echo ','
+			. $UKM/json.gen.hotplug
+			$BB echo ','
+			. $UKM/json.gen.thermal
+			$BB echo ','
+			. $UKM/json.gen.cpuvolt
+			$BB echo ','
+			. $UKM/json.gen.io
+			$BB echo ','
+			. $UKM/json.gen.gpu
+			$BB echo ','
+			if [ -f "/sys/devices/platform/kcal_ctrl.0/kcal" -o -f "/sys/devices/platform/mipi_lgit.1537/kgamma_b" -o -f "/sys/class/misc/gammacontrol/brightness" -o -f "/sys/devices/i2c-0/0-0038/lm3530_br_mode" -o -f "/sys/module/msm_fb/parameters/backlight_dimmer" -o -f "/sys/devices/platform/mipi_lgit.1537/kgamma_blue" -o -f "/sys/module/dsi_panel/kgamma_bn" -o -d "/sys/devices/virtual/graphics/fb0" -o -f "/sys/module/panel_s6e8aa0/parameters/contrast" -o -f "/sys/devices/platform/omapdss/manager0/gamma" -o -f "/sys/class/backlight/s6e8aa0/acl_set" ]; then
+				. $UKM/json.gen.gamma
+			$BB echo ','
+			fi
+			if [ -d "/sys/kernel/sound_control_3" -o -d "/sys/class/misc/soundcontrol" ]; then
+				. $UKM/json.gen.sound
+			$BB echo ','
+			fi
+			if [ -d "/sys/bus/i2c/devices/0-0058" ]; then
+				. $UKM/json.gen.speaker
+			$BB echo ','
+			fi
+			. $UKM/json.gen.mem
+			$BB echo ','
+			. $UKM/json.gen.wake
+			$BB echo ','
+			. $UKM/json.gen.misc
+			$BB echo ','
+			. $UKM/json.gen.status
+			$BB echo ','
+			. $UKM/json.gen.tools
+			$BB echo ','
+			. $UKM/json.gen.logs
+			$BB echo ','
+			. $UKM/json.gen.backup-restore
+			$BB echo ','
+			. $UKM/json.gen.vm
+			$BB echo ','
+			. $UKM/json.gen.adv
+    			$BB echo ','
+			. $UKM/json.gen.bpropEdit
+			$BB echo ','
+			. $UKM/json.gen.usb
+		else
+			. $UKM/json.gen.error
+		fi`
+    ]
+}
+CTAG
