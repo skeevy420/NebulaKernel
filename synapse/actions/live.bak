@@ -15,11 +15,12 @@ case $1 in
 		echo CPU0 - $FREQMAX_0 : $FREQMIN_0@nCPU1 - $FREQMAX_1 : $FREQMIN_1@nCPU2 - $FREQMAX_2 : $FREQMIN_2@nCPU3 - $FREQMAX_3 : $FREQMIN_3
 	;;
 	BusyBox_kernel)
-		$BB | awk '/BusyBox\ v/ {print tolower($1),($2)}'
-	;;
+				$BB | awk '/BusyBox\ v/ {print tolower($1),($2)}'
+				;;
 	BusyBox_system)
-		busybox | awk '/BusyBox\ v/ {print tolower($1),($2)}'
-	;;
+				NBB="0"
+				$BB echo `if [ -f "/system/xbin/busybox" ]; then BBS=/system/xbin/busybox; elif [ -f "/system/bin/busybox" ]; then BBS=/system/bin/busybox; else NBB="1"; $BB echo "No System Wide Busybox Found."; exit; fi; $BBS | awk '/BusyBox\ v/ {print tolower($1),($2)}'`;
+				;;
 	KSMStats)
 		KSM="$(expr `cat /sys/kernel/mm/ksm/run`)"
 		if [ KSM -eq "1" ]; then

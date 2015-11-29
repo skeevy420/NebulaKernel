@@ -1,11 +1,9 @@
 UKM=/res/synapse;
 BBK=/sbin/bb/busybox
-BBS=/system/xbin/busybox
 DEVICE=`sh $UKM/device/.device.sh`;
 
 
 case $1 in
-
 	BusyBox_kernel)
 				$BBK | awk '/BusyBox\ v/ {print tolower($1),($2)}'
 				;;
